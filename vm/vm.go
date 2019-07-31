@@ -2,7 +2,6 @@ package vm
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -64,22 +63,23 @@ func (vm *VM) Invoke(fidx int64, args ...int64) int64 {
 }
 
 func (vm *VM) interpret() int64 {
-	fmt.Println(vm.currentFrame().instructions())
-
-	for vm.currentFrame().ip < len(vm.currentFrame().instructions())-1 {
+	for vm.framesIndex > 1 || !vm.currentFrame().hasEnded() {
+		if vm.currentFrame().hasEnded() {
+			vm.framesIndex--
+		}
 		vm.currentFrame().ip++
 		ins := vm.currentFrame().instructions()
 		i := vm.currentFrame().ip
+		log.Println("instructions", ins, i)
 		op := opcode.Opcode(ins[i])
 		i++
-		fmt.Println("running op", op)
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
 		case op == opcode.I32Const:
 			val, size := readLEB(ins[i:], 32, true)
 			i += int(size)
-			log.Println("i32.const", val, size)
+			// log.Println("i32.const", val, size)
 			vm.push(int64(val))
 		case opcode.I32Add <= op && op <= opcode.I32Rotr:
 			b := int32(vm.pop())
@@ -139,6 +139,7 @@ func (vm *VM) interpret() int64 {
 			fidx, size := readLEB(ins[i:], 32, true)
 			i += int(size)
 			vm.setupFrame(int(fidx))
+			continue
 
 		case op == opcode.SetLocal:
 			arg, size := readLEB(ins[i:], 32, true)
@@ -152,16 +153,16 @@ func (vm *VM) interpret() int64 {
 			i += int(size)
 			frame := vm.currentFrame()
 			vm.push(vm.stack[frame.basePointer+int(arg)])
-			fmt.Println("Local retrieved", vm.stack[vm.sp-1])
+			log.Println("Local retrieved", vm.stack[vm.sp-1])
 		default:
 			log.Println("unknown opcode", op)
 		}
 		vm.currentFrame().ip = i - 1
 	}
-
 	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
+	vm.framesIndex--
 	if hasReturn {
-		vm.peek()
+		return vm.peek()
 	}
 	return 0
 }
@@ -199,7 +200,7 @@ func (vm *VM) setupFrame(fidx int) {
 	vm.frames[vm.framesIndex] = frame
 	vm.framesIndex++
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Body.Locals)
+	vm.sp = frame.basePointer + len(fn.Body.Locals) + len(fn.Sig.ParamTypes)
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -243,4 +244,8 @@ func NewFrame(fn *wasm.Function, basePointer int) *Frame {
 
 func (frame *Frame) instructions() []byte {
 	return frame.fn.Body.Code
+}
+
+func (frame *Frame) hasEnded() bool {
+	return frame.ip == len(frame.instructions())-1
 }

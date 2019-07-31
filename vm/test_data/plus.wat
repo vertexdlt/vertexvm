@@ -2,7 +2,7 @@
   (type $t0 (func))
   (type $t1 (func (result i32)))
   (func $__wasm_call_ctors (type $t0))
-  (func $main (export "main") (type $t1) (result i32)
+  (func $calc (export "calc") (type $t1) (result i32)
     i32.const 512
     i32.const 9
     i32.sub)

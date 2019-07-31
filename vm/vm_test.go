@@ -48,6 +48,7 @@ func TestVM(t *testing.T) {
 	tests := []vmTest{
 		{name: "i32", params: []int64{}, expected: -1},
 		{name: "local", params: []int64{2}, expected: 3},
+		{name: "call", params: []int64{}, expected: 16},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
@@ -71,7 +72,11 @@ func TestVM(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		ret := vm.Invoke(1, test.params...)
+		fnID, ok := vm.GetFunctionIndex("calc")
+		if !ok {
+			t.Error("cannot get function export")
+		}
+		ret := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
 			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
 		}
@@ -132,11 +137,15 @@ func TestWasmSuite(t *testing.T) {
 					t.Logf("Triggering %s with args", cmd.Action.Field)
 					t.Log(args)
 					ret := vm.Invoke(funcID, args...)
+					t.Log("ret", ret)
+
 					if len(cmd.Action.Expected) != 0 {
 						exp, err := strconv.ParseInt(cmd.Action.Expected[0].Value, 10, 64)
 						if err != nil {
 							panic(err)
 						}
+						t.Log(exp)
+
 						if cmd.Action.Expected[0].Type == "i32" {
 							ret = int64(int32(ret))
 							exp = int64(int32(exp))
