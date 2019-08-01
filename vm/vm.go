@@ -46,6 +46,7 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 		Module:      m,
 		stack:       make([]int64, StackSize),
 		frames:      make([]*Frame, MaxFrames),
+		globals:     make([]int64, len(m.GlobalIndexSpace)),
 		framesIndex: 0,
 		sp:          0,
 	}
