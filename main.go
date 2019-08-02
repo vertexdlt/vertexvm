@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 
-	"github.com/vertexdlt/vm/vm"
+	"github.com/vertexdlt/vertexvm/vm"
 )
 
 func main() {
