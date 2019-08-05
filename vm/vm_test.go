@@ -46,10 +46,12 @@ type vmTest struct {
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		{name: "i32", params: []int64{}, expected: -1},
-		{name: "local", params: []int64{2}, expected: 3},
-		{name: "call", params: []int64{}, expected: 16},
-		{name: "select", params: []int64{5}, expected: 3},
+		// {name: "i32", params: []int64{}, expected: -1},
+		// {name: "local", params: []int64{2}, expected: 3},
+		// {name: "call", params: []int64{}, expected: 16},
+		// {name: "select", params: []int64{5}, expected: 3},
+		{name: "block", params: []int64{32}, expected: 16},
+		{name: "block", params: []int64{30}, expected: 8},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)

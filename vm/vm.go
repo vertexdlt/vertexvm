@@ -17,11 +17,28 @@ const StackSize = 1024 * 8
 // MaxFrames is the maxinum active frames supported
 const MaxFrames = 1024
 
+// MaxFrames is the maxinum active frames supported
+const MaxBlocks = 1024
+
 // Frame or call frame holds the relevant execution information of a function
 type Frame struct {
 	fn          *wasm.Function
 	ip          int
 	basePointer int
+}
+
+type BlockType int
+
+const (
+	Norm BlockType = iota + 1
+	Loop
+	If
+	Else
+)
+
+type Block struct {
+	labelPointer int
+	blockType    BlockType
 }
 
 // VM virtual machine
@@ -32,6 +49,8 @@ type VM struct {
 	frames      []*Frame
 	framesIndex int
 	globals     []int64
+	blocks      []*Block
+	blocksIndex int
 }
 
 // NewVM initializes a new VM
@@ -50,6 +69,8 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 		globals:     make([]int64, len(m.GlobalIndexSpace)),
 		framesIndex: 0,
 		sp:          0,
+		blocks:      make([]*Block, MaxBlocks),
+		blocksIndex: 0,
 	}
 	vm.initGlobals()
 	return vm, nil
@@ -69,6 +90,7 @@ func (vm *VM) Invoke(fidx int64, args ...int64) int64 {
 
 func (vm *VM) interpret() int64 {
 	var retVal int64
+	var brDepth = -1
 	for {
 		if vm.currentFrame().hasEnded() {
 			hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
@@ -91,6 +113,15 @@ func (vm *VM) interpret() int64 {
 		log.Println("instructions", ins, ip)
 		op := opcode.Opcode(ins[ip])
 		ip++
+		if brDepth > -1 {
+			switch op {
+			case opcode.Block:
+			case opcode.End:
+			default:
+				fmt.Println("skip", op)
+				continue
+			}
+		}
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
@@ -161,6 +192,7 @@ func (vm *VM) interpret() int64 {
 					c = 1
 				}
 			}
+			fmt.Println("eq result", c)
 			vm.push(int64(c))
 		case op == opcode.Return:
 			return vm.pop()
@@ -203,6 +235,29 @@ func (vm *VM) interpret() int64 {
 				vm.push(second)
 			} else {
 				vm.push(first)
+			}
+		case op == opcode.Block:
+			block := &Block{blockType: Norm, labelPointer: -1}
+			vm.blocks[vm.blocksIndex] = block
+			vm.blocksIndex++
+			if brDepth > -1 {
+				brDepth++
+			}
+		case op == opcode.End:
+			vm.blocksIndex--
+			brDepth--
+		case op == opcode.Br:
+			arg, size := readLEB(ins[ip:], 32, true)
+			ip += int(size)
+			vm.blocksIndex -= int(arg)
+			brDepth = int(arg)
+		case op == opcode.BrIf:
+			arg, size := readLEB(ins[ip:], 32, true)
+			ip += int(size)
+			cond := vm.pop()
+			if cond != 0 {
+				vm.blocksIndex -= int(arg)
+				brDepth = int(arg)
 			}
 		default:
 			log.Println("unknown opcode", op)

@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	data, err := ioutil.ReadFile("vm/test_data/i32.wasm")
+	data, err := ioutil.ReadFile("vm/test_data/block.wasm")
 	if err != nil {
 		panic(err)
 	}
@@ -16,5 +16,13 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(machine.Invoke(1))
+	fnIndex, ok := machine.GetFunctionIndex("main")
+	if !ok {
+		panic("cannot get fn export")
+	}
+	fmt.Println(machine.Module.FunctionIndexSpace)
+	for i, fn := range machine.Module.FunctionIndexSpace {
+		fmt.Println("func", i, fn.Body.Code)
+	}
+	fmt.Println(machine.Invoke(fnIndex))
 }
