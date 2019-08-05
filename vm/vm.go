@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -149,6 +150,18 @@ func (vm *VM) interpret() int64 {
 				c = int32(bits.RotateLeft32(uint32(a), int(-b)))
 			}
 			vm.push(int64(c))
+		case opcode.I32Eq <= op && op <= opcode.I32GeU:
+			b := int32(vm.pop())
+			a := int32(vm.pop())
+			var c int32
+			switch op {
+			case opcode.I32Eq:
+				c = 0
+				if a == b {
+					c = 1
+				}
+			}
+			vm.push(int64(c))
 		case op == opcode.Return:
 			return vm.pop()
 		case op == opcode.Call:
@@ -183,8 +196,9 @@ func (vm *VM) interpret() int64 {
 			vm.pop()
 		case op == opcode.Select:
 			cond := vm.pop()
-			first := vm.pop()
 			second := vm.pop()
+			first := vm.pop()
+			fmt.Println(cond, first, second)
 			if cond == 0 {
 				vm.push(second)
 			} else {
