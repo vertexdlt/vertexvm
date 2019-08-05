@@ -22,9 +22,10 @@ const MaxBlocks = 1024
 
 // Frame or call frame holds the relevant execution information of a function
 type Frame struct {
-	fn          *wasm.Function
-	ip          int
-	basePointer int
+	fn             *wasm.Function
+	ip             int
+	basePointer    int
+	baseBlockIndex int
 }
 
 type BlockType int
@@ -97,13 +98,16 @@ func (vm *VM) interpret() int64 {
 			if hasReturn {
 				retVal = vm.peek()
 				vm.sp = vm.currentFrame().basePointer
+				vm.blocksIndex = vm.currentFrame().baseBlockIndex
 				vm.push(retVal)
 			} else {
 				retVal = 0
 				vm.sp = vm.currentFrame().basePointer
+				vm.blocksIndex = vm.currentFrame().baseBlockIndex
 			}
 			vm.popFrame()
 			if vm.framesIndex == 0 {
+				log.Println("End check", vm.sp, vm.framesIndex, vm.blocksIndex)
 				return retVal
 			}
 		}
@@ -245,18 +249,25 @@ func (vm *VM) interpret() int64 {
 			}
 		case op == opcode.End:
 			vm.blocksIndex--
+			if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
+				panic("cannot find matching block openning")
+			}
 			brDepth--
 		case op == opcode.Br:
 			arg, size := readLEB(ins[ip:], 32, true)
 			ip += int(size)
-			vm.blocksIndex -= int(arg)
+			if vm.blocksIndex-int(arg) < vm.currentFrame().baseBlockIndex {
+				panic("cannot break out of current function")
+			}
 			brDepth = int(arg)
 		case op == opcode.BrIf:
 			arg, size := readLEB(ins[ip:], 32, true)
 			ip += int(size)
 			cond := vm.pop()
 			if cond != 0 {
-				vm.blocksIndex -= int(arg)
+				if vm.blocksIndex-int(arg) < vm.currentFrame().baseBlockIndex {
+					panic("cannot break out of current function")
+				}
 				brDepth = int(arg)
 			}
 		default:
@@ -295,7 +306,7 @@ func readLEB(bytes []byte, maxbit uint32, hasSign bool) (int64, uint32) {
 
 func (vm *VM) setupFrame(fidx int) {
 	fn := vm.Module.GetFunction(fidx)
-	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes))
+	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	// leave some space for locals
 	vm.sp = frame.basePointer + len(fn.Body.Locals) + len(fn.Sig.ParamTypes)
@@ -344,11 +355,12 @@ func (vm *VM) GetFunctionIndex(name string) (int64, bool) {
 }
 
 // NewFrame initialize a call frame for a given function fn
-func NewFrame(fn *wasm.Function, basePointer int) *Frame {
+func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 	f := &Frame{
-		fn:          fn,
-		ip:          -1,
-		basePointer: basePointer,
+		fn:             fn,
+		ip:             -1,
+		basePointer:    basePointer,
+		baseBlockIndex: baseBlockIndex,
 	}
 	return f
 }
