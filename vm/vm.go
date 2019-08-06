@@ -114,12 +114,14 @@ func (vm *VM) interpret() int64 {
 		vm.currentFrame().ip++
 		ins := vm.currentFrame().instructions()
 		ip := vm.currentFrame().ip
-		log.Println("instructions", ins, ip)
 		op := opcode.Opcode(ins[ip])
+		// log.Println("instructions", ins, ip, op)
+		// log.Println("stack", vm.sp, vm.stack[:10])
 		ip++
 		if brDepth > -1 {
 			switch op {
 			case opcode.Block:
+			case opcode.Loop:
 			case opcode.End:
 			default:
 				fmt.Println("skip", op)
@@ -139,6 +141,7 @@ func (vm *VM) interpret() int64 {
 			var c int32
 			switch op {
 			case opcode.I32Add:
+				fmt.Println("Adding", a, b)
 				c = a + b
 			case opcode.I32Sub:
 				c = a - b
@@ -210,11 +213,13 @@ func (vm *VM) interpret() int64 {
 			ip += int(size)
 			frame := vm.currentFrame()
 			vm.stack[frame.basePointer+int(arg)] = vm.pop()
+			// fmt.Println("Setting local", int(arg), frame.basePointer+int(arg), vm.stack[frame.basePointer+int(arg)], vm.stack[:10])
 		case op == opcode.GetLocal:
 			arg, size := readLEB(ins[ip:], 32, true)
 			ip += int(size)
 			frame := vm.currentFrame()
 			vm.push(vm.stack[frame.basePointer+int(arg)])
+			// fmt.Println("Getting local", arg, frame.basePointer+int(arg), vm.stack[frame.basePointer+int(arg)], vm.stack[:10])
 		case op == opcode.TeeLocal:
 			arg, size := readLEB(ins[ip:], 32, true)
 			ip += int(size)
@@ -241,23 +246,26 @@ func (vm *VM) interpret() int64 {
 				vm.push(first)
 			}
 		case op == opcode.Block:
-			block := &Block{blockType: Norm, labelPointer: -1}
-			vm.blocks[vm.blocksIndex] = block
-			vm.blocksIndex++
+			block := NewBlock(-1, Norm)
+			vm.pushBlock(block)
 			if brDepth > -1 {
 				brDepth++
 			}
 		case op == opcode.End:
-			vm.blocksIndex--
-			if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
-				panic("cannot find matching block openning")
-			}
+			vm.popBlock()
 			brDepth--
 		case op == opcode.Br:
 			arg, size := readLEB(ins[ip:], 32, true)
 			ip += int(size)
+
 			if vm.blocksIndex-int(arg) < vm.currentFrame().baseBlockIndex {
 				panic("cannot break out of current function")
+			}
+			jumpBlock := vm.blocks[vm.blocksIndex-1-int(arg)]
+			if jumpBlock.blockType == Loop {
+				fmt.Println("jumping to ", jumpBlock.labelPointer)
+				vm.currentFrame().ip = jumpBlock.labelPointer
+				continue
 			}
 			brDepth = int(arg)
 		case op == opcode.BrIf:
@@ -268,11 +276,24 @@ func (vm *VM) interpret() int64 {
 				if vm.blocksIndex-int(arg) < vm.currentFrame().baseBlockIndex {
 					panic("cannot break out of current function")
 				}
+				jumpBlock := vm.blocks[vm.blocksIndex-1-int(arg)]
+				if jumpBlock.blockType == Loop {
+					fmt.Println("jumping to ", jumpBlock.labelPointer)
+					vm.currentFrame().ip = jumpBlock.labelPointer
+					continue
+				}
 				brDepth = int(arg)
+			}
+		case op == opcode.Loop:
+			block := NewBlock(ip, Loop)
+			vm.pushBlock(block)
+			if brDepth > -1 {
+				brDepth++
 			}
 		default:
 			log.Println("unknown opcode", op)
 		}
+		fmt.Println("instruction", op, "stack", vm.stack[:vm.sp])
 		vm.currentFrame().ip = ip - 1
 	}
 }
@@ -309,7 +330,9 @@ func (vm *VM) setupFrame(fidx int) {
 	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Body.Locals) + len(fn.Sig.ParamTypes)
+	vm.sp = frame.basePointer + len(fn.Body.Locals) + len(fn.Sig.ParamTypes) + 1
+	fmt.Println(fn.Body.Locals)
+	fmt.Println("first sp", vm.sp, len(fn.Body.Locals), len(fn.Sig.ParamTypes))
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -346,6 +369,22 @@ func (vm *VM) popFrame() *Frame {
 	return vm.frames[vm.framesIndex]
 }
 
+func (vm *VM) pushBlock(block *Block) {
+	if vm.blocksIndex == MaxBlocks {
+		panic("Blocks overflow")
+	}
+	vm.blocks[vm.blocksIndex] = block
+	vm.blocksIndex++
+}
+
+func (vm *VM) popBlock() *Block {
+	vm.blocksIndex--
+	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
+		panic("cannot find matching block openning")
+	}
+	return vm.blocks[vm.blocksIndex]
+}
+
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (int64, bool) {
 	if entry, ok := vm.Module.Export.Entries[name]; ok {
@@ -363,6 +402,14 @@ func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 		baseBlockIndex: baseBlockIndex,
 	}
 	return f
+}
+
+func NewBlock(labelPointer int, blockType BlockType) *Block {
+	b := &Block{
+		labelPointer: labelPointer,
+		blockType:    blockType,
+	}
+	return b
 }
 
 func (frame *Frame) instructions() []byte {

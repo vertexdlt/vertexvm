@@ -50,8 +50,9 @@ func TestVM(t *testing.T) {
 		// {name: "local", params: []int64{2}, expected: 3},
 		// {name: "call", params: []int64{}, expected: 16},
 		// {name: "select", params: []int64{5}, expected: 3},
-		{name: "block", params: []int64{32}, expected: 16},
-		{name: "block", params: []int64{30}, expected: 8},
+		// {name: "block", params: []int64{32}, expected: 16},
+		// {name: "block", params: []int64{30}, expected: 8},
+		{name: "loop", params: []int64{30}, expected: 435},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
