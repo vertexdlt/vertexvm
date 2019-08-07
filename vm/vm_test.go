@@ -42,17 +42,22 @@ type vmTest struct {
 	name     string
 	params   []int64
 	expected int64
+	entry    string
 }
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		// {name: "i32", params: []int64{}, expected: -1},
-		// {name: "local", params: []int64{2}, expected: 3},
-		// {name: "call", params: []int64{}, expected: 16},
-		// {name: "select", params: []int64{5}, expected: 3},
-		// {name: "block", params: []int64{32}, expected: 16},
-		// {name: "block", params: []int64{30}, expected: 8},
-		{name: "loop", params: []int64{30}, expected: 435},
+		{name: "i32", entry: "calc", params: []int64{}, expected: -1},
+		{name: "local", entry: "calc", params: []int64{2}, expected: 3},
+		{name: "call", entry: "calc", params: []int64{}, expected: 16},
+		{name: "select", entry: "calc", params: []int64{5}, expected: 3},
+		{name: "block", entry: "calc", params: []int64{32}, expected: 16},
+		{name: "block", entry: "calc", params: []int64{30}, expected: 8},
+		{name: "loop", entry: "calc", params: []int64{30}, expected: 435},
+		{name: "ifelse", entry: "calc", params: []int64{1}, expected: 5},
+		{name: "ifelse", entry: "calc", params: []int64{0}, expected: 7},
+		{name: "loop", entry: "isPrime", params: []int64{6}, expected: 2},
+		{name: "loop", entry: "isPrime", params: []int64{9}, expected: 3},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
@@ -76,7 +81,7 @@ func TestVM(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		fnID, ok := vm.GetFunctionIndex("calc")
+		fnID, ok := vm.GetFunctionIndex(test.entry)
 		if !ok {
 			t.Error("cannot get function export")
 		}
