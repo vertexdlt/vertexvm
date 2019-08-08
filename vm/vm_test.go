@@ -40,15 +40,15 @@ type ValueInfo struct {
 
 type vmTest struct {
 	name     string
-	params   []int64
-	expected int64
+	params   []uint64
+	expected uint64
 }
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		{name: "i32", params: []int64{}, expected: -1},
-		{name: "local", params: []int64{2}, expected: 3},
-		{name: "call", params: []int64{}, expected: 16},
+		{name: "i32", params: []uint64{}, expected: 0},
+		{name: "local", params: []uint64{2}, expected: 3},
+		{name: "call", params: []uint64{}, expected: 16},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
@@ -84,8 +84,9 @@ func TestVM(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	tests := []string{"i32"}
+	tests := []string{"i32", "i64"}
 	for _, name := range tests {
+		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)
 		jsonFile := fmt.Sprintf("./test_suite/%s.json", name)
 		cmd := exec.Command("wast2json", wast, "-o", jsonFile)
@@ -126,29 +127,28 @@ func TestWasmSuite(t *testing.T) {
 					if !ok {
 						panic("function not found")
 					}
-					args := make([]int64, 0)
+					args := make([]uint64, 0)
 					for _, arg := range cmd.Action.Args {
-						val, err := strconv.ParseInt(arg.Value, 10, 64)
+						val, err := strconv.ParseUint(arg.Value, 10, 64)
 						if err != nil {
 							panic(err)
 						}
 						args = append(args, val)
 					}
-					t.Logf("Triggering %s with args", cmd.Action.Field)
+					t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
 					t.Log(args)
 					ret := vm.Invoke(funcID, args...)
 					t.Log("ret", ret)
 
-					if len(cmd.Action.Expected) != 0 {
-						exp, err := strconv.ParseInt(cmd.Action.Expected[0].Value, 10, 64)
+					if len(cmd.Expected) != 0 {
+						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
 						if err != nil {
 							panic(err)
 						}
-						t.Log(exp)
 
-						if cmd.Action.Expected[0].Type == "i32" {
-							ret = int64(int32(ret))
-							exp = int64(int32(exp))
+						if cmd.Expected[0].Type == "i32" {
+							ret = uint64(uint32(ret))
+							exp = uint64(uint32(exp))
 						}
 
 						if ret != exp {
