@@ -93,22 +93,88 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
 
-		// I32 Ops
+			// I32 Ops
 		case op == opcode.I32Const:
 			val, size := readLEB(ins[ip:], 32, false)
 			ip += int(size)
 			vm.push(uint64(val))
+		case op == opcode.I32Eqz:
+			if uint32(vm.pop()) == 0 {
+				vm.push(1)
+			} else {
+				vm.push(0)
+			}
 		case op == opcode.I32Clz:
 			vm.push(uint64(bits.LeadingZeros32(uint32(vm.pop()))))
 		case op == opcode.I32Ctz:
 			vm.push(uint64(bits.TrailingZeros32(uint32(vm.pop()))))
 		case op == opcode.I32Popcnt:
 			vm.push(uint64(bits.OnesCount32(uint32(vm.pop()))))
-		case opcode.I32Add <= op && op <= opcode.I32Rotr:
+		case (opcode.I32Eq <= op && op <= opcode.I32GeU) || (opcode.I32Add <= op && op <= opcode.I32Rotr):
 			b := uint32(vm.pop())
 			a := uint32(vm.pop())
 			var c uint32
 			switch op {
+			case opcode.I32Eq:
+				if a == b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32Ne:
+				if a == b {
+					c = 0
+				} else {
+					c = 1
+				}
+			case opcode.I32LtS:
+				if int32(a) < int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LtU:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GtS:
+				if int32(a) > int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GtU:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LeS:
+				if int32(a) <= int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LeU:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GeS:
+				if int32(a) >= int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GeU:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
 			case opcode.I32Add:
 				c = a + b
 			case opcode.I32Sub:
@@ -162,17 +228,83 @@ func (vm *VM) interpret() uint64 {
 			val, size := readLEB(ins[ip:], 64, false)
 			ip += int(size)
 			vm.push(uint64(val))
+		case op == opcode.I64Eqz:
+			if vm.pop() == 0 {
+				vm.push(1)
+			} else {
+				vm.push(0)
+			}
 		case op == opcode.I64Clz:
 			vm.push(uint64(bits.LeadingZeros64(vm.pop())))
 		case op == opcode.I64Ctz:
 			vm.push(uint64(bits.TrailingZeros64(vm.pop())))
 		case op == opcode.I64Popcnt:
 			vm.push(uint64(bits.OnesCount64(vm.pop())))
-		case opcode.I64Add <= op && op <= opcode.I64Rotr:
+		case (opcode.I64Eq <= op && op <= opcode.I64GeU) || (opcode.I64Add <= op && op <= opcode.I64Rotr):
 			b := vm.pop()
 			a := vm.pop()
 			var c uint64
 			switch op {
+			case opcode.I64Eq:
+				if a == b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64Ne:
+				if a == b {
+					c = 0
+				} else {
+					c = 1
+				}
+			case opcode.I64LtS:
+				if int64(a) < int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LtU:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GtS:
+				if int64(a) > int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GtU:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LeS:
+				if int64(a) <= int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LeU:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GeS:
+				if int64(a) >= int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GeU:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
 			case opcode.I64Add:
 				c = a + b
 			case opcode.I64Sub:
