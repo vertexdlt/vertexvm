@@ -86,6 +86,7 @@ func TestVM(t *testing.T) {
 func TestWasmSuite(t *testing.T) {
 	tests := []string{"i32", "i64"}
 	for _, name := range tests {
+		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)
 		jsonFile := fmt.Sprintf("./test_suite/%s.json", name)
 		cmd := exec.Command("wast2json", wast, "-o", jsonFile)
@@ -134,19 +135,18 @@ func TestWasmSuite(t *testing.T) {
 						}
 						args = append(args, val)
 					}
-					t.Logf("Triggering %s with args", cmd.Action.Field)
+					t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
 					t.Log(args)
 					ret := vm.Invoke(funcID, args...)
 					t.Log("ret", ret)
 
-					if len(cmd.Action.Expected) != 0 {
-						exp, err := strconv.ParseUint(cmd.Action.Expected[0].Value, 10, 64)
+					if len(cmd.Expected) != 0 {
+						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
 						if err != nil {
 							panic(err)
 						}
-						t.Log(exp)
 
-						if cmd.Action.Expected[0].Type == "i32" {
+						if cmd.Expected[0].Type == "i32" {
 							ret = uint64(uint32(ret))
 							exp = uint64(uint32(exp))
 						}

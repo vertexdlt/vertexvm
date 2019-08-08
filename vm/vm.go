@@ -141,9 +141,9 @@ func (vm *VM) interpret() uint64 {
 			case opcode.I32Shl:
 				c = a << (b % 32)
 			case opcode.I32ShrS:
-				c = uint32(int32(a) >> b)
+				c = uint32(int32(a) >> (b % 32))
 			case opcode.I32ShrU:
-				c = a >> b
+				c = a >> (b % 32)
 			case opcode.I32Rotl:
 				c = bits.RotateLeft32(a, int(b))
 			case opcode.I32Rotr:
@@ -199,9 +199,9 @@ func (vm *VM) interpret() uint64 {
 			case opcode.I64Shl:
 				c = a << (b % 64)
 			case opcode.I64ShrS:
-				c = uint64(int64(a) >> b)
+				c = uint64(int64(a) >> (b % 64))
 			case opcode.I64ShrU:
-				c = a >> b
+				c = a >> (b % 64)
 			case opcode.I64Rotl:
 				c = bits.RotateLeft64(a, int(b))
 			case opcode.I64Rotr:
