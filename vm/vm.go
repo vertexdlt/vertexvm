@@ -7,7 +7,7 @@ import (
 	"math/bits"
 
 	"github.com/go-interpreter/wagon/wasm"
-	"github.com/vertexdlt/vm/opcode"
+	"github.com/vertexdlt/vertexvm/opcode"
 )
 
 // StackSize is the VM stack depth
@@ -22,11 +22,11 @@ const MaxBlocks = 1024
 // VM virtual machine
 type VM struct {
 	Module      *wasm.Module
-	stack       []int64
+	stack       []uint64
 	sp          int //point to the next available slot
 	frames      []*Frame
 	framesIndex int
-	globals     []int64
+	globals     []uint64
 	blocks      []*Block
 	blocksIndex int
 	breakDepth  int
@@ -42,9 +42,9 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 
 	vm := &VM{
 		Module:      m,
-		stack:       make([]int64, StackSize),
+		stack:       make([]uint64, StackSize),
 		frames:      make([]*Frame, MaxFrames),
-		globals:     make([]int64, len(m.GlobalIndexSpace)),
+		globals:     make([]uint64, len(m.GlobalIndexSpace)),
 		framesIndex: 0,
 		sp:          0,
 		blocks:      make([]*Block, MaxBlocks),
@@ -56,7 +56,7 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 }
 
 // Invoke triggers a WASM function
-func (vm *VM) Invoke(fidx int64, args ...int64) int64 {
+func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	for _, arg := range args {
 		vm.push(arg)
 	}
@@ -66,14 +66,15 @@ func (vm *VM) Invoke(fidx int64, args ...int64) int64 {
 }
 
 // GetFunctionIndex look up a function export index by its name
-func (vm *VM) GetFunctionIndex(name string) (int64, bool) {
+func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return int64(entry.Index), ok
+		return uint64(entry.Index), ok
 	}
-	return -1, false
+	return 0, false
 }
 
-func (vm *VM) interpret() int64 {
+func (vm *VM) interpret() uint64 {
+	var retVal uint64
 	for {
 		if vm.currentFrame().hasEnded() {
 			vm.popFrame()
@@ -93,6 +94,8 @@ func (vm *VM) interpret() int64 {
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
+
+			// I32 Ops
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
@@ -184,36 +187,86 @@ func (vm *VM) interpret() int64 {
 			arg := frame.readLEB(32, true)
 			vm.globals[arg] = vm.pop()
 		case op == opcode.I32Const:
-			val := frame.readLEB(32, true)
-			vm.push(int64(val))
+			val, size := readLEB(ins[ip:], 32, false)
+			ip += int(size)
+			vm.push(uint64(val))
 		case op == opcode.I32Eqz:
-			if int32(vm.pop()) == 0 {
+			if uint32(vm.pop()) == 0 {
 				vm.push(1)
 			} else {
 				vm.push(0)
 			}
-		case opcode.I32Eq <= op && op <= opcode.I32GeU:
-			b := int32(vm.pop())
-			a := int32(vm.pop())
-			var c int32
+		case op == opcode.I32Clz:
+			vm.push(uint64(bits.LeadingZeros32(uint32(vm.pop()))))
+		case op == opcode.I32Ctz:
+			vm.push(uint64(bits.TrailingZeros32(uint32(vm.pop()))))
+		case op == opcode.I32Popcnt:
+			vm.push(uint64(bits.OnesCount32(uint32(vm.pop()))))
+		case (opcode.I32Eq <= op && op <= opcode.I32GeU) || (opcode.I32Add <= op && op <= opcode.I32Rotr):
+			b := uint32(vm.pop())
+			a := uint32(vm.pop())
+			var c uint32
 			switch op {
 			case opcode.I32Eq:
-				c = 0
 				if a == b {
 					c = 1
+				} else {
+					c = 0
 				}
-			case opcode.I32LtU:
-				c = 0
-				if uint32(a) < uint32(b) {
+			case opcode.I32Ne:
+				if a == b {
+					c = 0
+				} else {
 					c = 1
 				}
-			}
-			vm.push(int64(c))
-		case opcode.I32Add <= op && op <= opcode.I32Rotr:
-			b := int32(vm.pop())
-			a := int32(vm.pop())
-			var c int32
-			switch op {
+			case opcode.I32LtS:
+				if int32(a) < int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LtU:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GtS:
+				if int32(a) > int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GtU:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LeS:
+				if int32(a) <= int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32LeU:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GeS:
+				if int32(a) >= int32(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I32GeU:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
 			case opcode.I32Add:
 				c = a + b
 			case opcode.I32Sub:
@@ -224,25 +277,25 @@ func (vm *VM) interpret() int64 {
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				if a == math.MinInt32 && b == -1 {
+				if a == math.MaxInt32+1 && b == math.MaxInt32 {
 					panic("signed integer overflow")
 				}
-				c = a / b
+				c = uint32(int32(a) / int32(b))
 			case opcode.I32DivU:
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				c = int32(uint32(a) / uint32(b))
+				c = a / b
 			case opcode.I32RemS:
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				c = a % b
+				c = uint32(int32(a) % int32(b))
 			case opcode.I32RemU:
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				c = int32(uint32(a) % uint32(b))
+				c = a % b
 			case opcode.I32And:
 				c = a & b
 			case opcode.I32Or:
@@ -250,17 +303,147 @@ func (vm *VM) interpret() int64 {
 			case opcode.I32Xor:
 				c = a ^ b
 			case opcode.I32Shl:
-				c = a << (uint32(b) % 32)
+				c = a << (b % 32)
 			case opcode.I32ShrS:
-				c = a >> uint32(b)
+				c = uint32(int32(a) >> (b % 32))
 			case opcode.I32ShrU:
-				c = int32(uint32(a) >> uint32(b))
+				c = a >> (b % 32)
 			case opcode.I32Rotl:
-				c = int32(bits.RotateLeft32(uint32(a), int(b)))
+				c = bits.RotateLeft32(a, int(b))
 			case opcode.I32Rotr:
-				c = int32(bits.RotateLeft32(uint32(a), int(-b)))
+				c = bits.RotateLeft32(a, int(-b))
 			}
-			vm.push(int64(c))
+			vm.push(uint64(c))
+
+		// I64 Ops
+		case op == opcode.I64Const:
+			val, size := readLEB(ins[ip:], 64, false)
+			ip += int(size)
+			vm.push(uint64(val))
+		case op == opcode.I64Eqz:
+			if vm.pop() == 0 {
+				vm.push(1)
+			} else {
+				vm.push(0)
+			}
+		case op == opcode.I64Clz:
+			vm.push(uint64(bits.LeadingZeros64(vm.pop())))
+		case op == opcode.I64Ctz:
+			vm.push(uint64(bits.TrailingZeros64(vm.pop())))
+		case op == opcode.I64Popcnt:
+			vm.push(uint64(bits.OnesCount64(vm.pop())))
+		case (opcode.I64Eq <= op && op <= opcode.I64GeU) || (opcode.I64Add <= op && op <= opcode.I64Rotr):
+			b := vm.pop()
+			a := vm.pop()
+			var c uint64
+			switch op {
+			case opcode.I64Eq:
+				if a == b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64Ne:
+				if a == b {
+					c = 0
+				} else {
+					c = 1
+				}
+			case opcode.I64LtS:
+				if int64(a) < int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LtU:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GtS:
+				if int64(a) > int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GtU:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LeS:
+				if int64(a) <= int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64LeU:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GeS:
+				if int64(a) >= int64(b) {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64GeU:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.I64Add:
+				c = a + b
+			case opcode.I64Sub:
+				c = a - b
+			case opcode.I64Mul:
+				c = a * b
+			case opcode.I64DivS:
+				if b == 0 {
+					panic("integer division by zero")
+				}
+				if a == math.MaxInt64+1 && b == math.MaxInt64 {
+					panic("signed integer overflow")
+				}
+				c = uint64(int64(a) / int64(b))
+			case opcode.I64DivU:
+				if b == 0 {
+					panic("integer division by zero")
+				}
+				c = a / b
+			case opcode.I64RemS:
+				if b == 0 {
+					panic("integer division by zero")
+				}
+				c = uint64(int64(a) % int64(b))
+			case opcode.I64RemU:
+				if b == 0 {
+					panic("integer division by zero")
+				}
+				c = a % b
+			case opcode.I64And:
+				c = a & b
+			case opcode.I64Or:
+				c = a | b
+			case opcode.I64Xor:
+				c = a ^ b
+			case opcode.I64Shl:
+				c = a << (b % 64)
+			case opcode.I64ShrS:
+				c = uint64(int64(a) >> (b % 64))
+			case opcode.I64ShrU:
+				c = a >> (b % 64)
+			case opcode.I64Rotl:
+				c = bits.RotateLeft64(a, int(b))
+			case opcode.I64Rotr:
+				c = bits.RotateLeft64(a, int(-b))
+			}
+			vm.push(c)
 		default:
 			log.Printf("unknown opcode 0x%x\n", op)
 		}
@@ -320,7 +503,7 @@ func (vm *VM) currentFrame() *Frame {
 	return vm.frames[vm.framesIndex-1]
 }
 
-func (vm *VM) push(val int64) {
+func (vm *VM) push(val uint64) {
 	if vm.sp == StackSize {
 		panic("Stack overflow")
 	}
@@ -328,12 +511,12 @@ func (vm *VM) push(val int64) {
 	vm.sp++
 }
 
-func (vm *VM) pop() int64 {
+func (vm *VM) pop() uint64 {
 	vm.sp--
 	return vm.stack[vm.sp]
 }
 
-func (vm *VM) peek() int64 {
+func (vm *VM) peek() uint64 {
 	return vm.stack[vm.sp-1]
 }
 
@@ -384,13 +567,13 @@ func (vm *VM) initGlobals() error {
 		}
 		switch v := val.(type) {
 		case int32:
-			vm.globals[i] = int64(v)
+			vm.globals[i] = uint64(v)
 		case int64:
-			vm.globals[i] = int64(v)
+			vm.globals[i] = uint64(v)
 		case float32:
-			vm.globals[i] = int64(math.Float32bits(v))
+			vm.globals[i] = uint64(math.Float32bits(v))
 		case float64:
-			vm.globals[i] = int64(math.Float64bits(v))
+			vm.globals[i] = uint64(math.Float64bits(v))
 		}
 	}
 	return nil
