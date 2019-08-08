@@ -113,10 +113,10 @@ func (vm *VM) interpret() uint64 {
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				if a == math.MaxInt32+1 && b == math.MaxInt32-1 {
+				if a == math.MaxInt32+1 && b == math.MaxInt32 {
 					panic("signed integer overflow")
 				}
-				c = a / b
+				c = uint32(int32(a) / int32(b))
 			case opcode.I32DivU:
 				if b == 0 {
 					panic("integer division by zero")
@@ -140,7 +140,9 @@ func (vm *VM) interpret() uint64 {
 				c = a ^ b
 			case opcode.I32Shl:
 				c = a << (b % 32)
-			case opcode.I32ShrS, opcode.I32ShrU:
+			case opcode.I32ShrS:
+				c = uint32(int32(a) >> b)
+			case opcode.I32ShrU:
 				c = a >> b
 			case opcode.I32Rotl:
 				c = bits.RotateLeft32(a, int(b))
@@ -169,10 +171,10 @@ func (vm *VM) interpret() uint64 {
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				if a == math.MaxInt64+1 && b == math.MaxInt64-1 {
+				if a == math.MaxInt64+1 && b == math.MaxInt64 {
 					panic("signed integer overflow")
 				}
-				c = a / b
+				c = uint64(int64(a) / int64(b))
 			case opcode.I64DivU:
 				if b == 0 {
 					panic("integer division by zero")
@@ -196,7 +198,9 @@ func (vm *VM) interpret() uint64 {
 				c = a ^ b
 			case opcode.I64Shl:
 				c = a << (b % 64)
-			case opcode.I64ShrS, opcode.I64ShrU:
+			case opcode.I64ShrS:
+				c = uint64(int64(a) >> b)
+			case opcode.I64ShrU:
 				c = a >> b
 			case opcode.I64Rotl:
 				c = bits.RotateLeft64(a, int(b))
