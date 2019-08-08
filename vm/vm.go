@@ -346,12 +346,16 @@ func (vm *VM) setupFrame(fidx int) {
 	fn := vm.Module.GetFunction(fidx)
 	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
-	// leave some space for locals
-	numVars := len(fn.Sig.ParamTypes)
+	numLocals := 0
 	for _, entry := range fn.Body.Locals {
-		numVars += int(entry.Count)
+		numLocals += int(entry.Count)
 	}
-	vm.sp = frame.basePointer + numVars
+	// leave some space for locals
+	vm.sp = frame.basePointer + len(fn.Sig.ParamTypes) + numLocals
+	// uninitialize locals
+	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
+		vm.stack[i] = 0
+	}
 }
 
 func (vm *VM) currentFrame() *Frame {
