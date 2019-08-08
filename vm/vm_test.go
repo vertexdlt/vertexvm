@@ -49,6 +49,37 @@ type vmTest struct {
 	entry    string
 }
 
+func getVM(name string) *VM {
+	wat := fmt.Sprintf("./test_data/%s.wat", name)
+	wasm := fmt.Sprintf("./test_data/%s.wasm", name)
+	cmd := exec.Command("wat2wasm", wat, "-o", wasm)
+	err := cmd.Start()
+	if err != nil {
+		panic(err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		panic(err)
+	}
+	data, err := ioutil.ReadFile(wasm)
+	if err != nil {
+		panic(err)
+	}
+	vm, err := NewVM(data)
+	if err != nil {
+		panic(err)
+	}
+	return vm
+}
+
+func TestNeg(t *testing.T) {
+	vm := getVM("i32")
+	fnID, ok := vm.GetFunctionIndex("somefunc")
+	if ok || fnID != -1 {
+		t.Errorf("Expect function index to be -1")
+	}
+}
+
 func TestVM(t *testing.T) {
 	tests := []vmTest{
 		{name: "i32", entry: "calc", params: []int64{}, expected: -1},
@@ -65,27 +96,7 @@ func TestVM(t *testing.T) {
 		{name: "loop", entry: "isPrime", params: []int64{10007}, expected: 1},
 	}
 	for _, test := range tests {
-		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
-		wasm := fmt.Sprintf("./test_data/%s.wasm", test.name)
-		fmt.Println(test)
-		cmd := exec.Command("wat2wasm", wat, "-o", wasm)
-		err := cmd.Start()
-		if err != nil {
-			panic(err)
-		}
-		err = cmd.Wait()
-		if err != nil {
-			panic(err)
-		}
-
-		data, err := ioutil.ReadFile(wasm)
-		if err != nil {
-			panic(err)
-		}
-		vm, err := NewVM(data)
-		if err != nil {
-			panic(err)
-		}
+		vm := getVM(test.name)
 		fnID, ok := vm.GetFunctionIndex(test.entry)
 		if !ok {
 			t.Error("cannot get function export")
@@ -197,14 +208,14 @@ func TestWasmSuite(t *testing.T) {
 					ret := vm.Invoke(funcID, args...)
 					t.Log("ret", ret)
 
-					if len(cmd.Action.Expected) != 0 {
-						exp, err := strconv.ParseInt(cmd.Action.Expected[0].Value, 10, 64)
+					if len(cmd.Expected) != 0 {
+						exp, err := strconv.ParseInt(cmd.Expected[0].Value, 10, 64)
 						if err != nil {
 							panic(err)
 						}
 						t.Log(exp)
 
-						if cmd.Action.Expected[0].Type == "i32" {
+						if cmd.Expected[0].Type == "i32" {
 							ret = int64(int32(ret))
 							exp = int64(int32(exp))
 						}

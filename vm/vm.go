@@ -2,7 +2,6 @@ package vm
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -19,29 +18,6 @@ const MaxFrames = 1024
 
 // MaxBlocks is the maxinum of nested blocks supported
 const MaxBlocks = 1024
-
-// Frame or call frame holds the relevant execution information of a function
-type Frame struct {
-	fn             *wasm.Function
-	ip             int
-	basePointer    int
-	baseBlockIndex int
-}
-
-type BlockType int
-
-const (
-	Norm BlockType = iota + 1
-	Loop
-	If
-	Else
-)
-
-type Block struct {
-	labelPointer int //only for Loop Block
-	blockType    BlockType
-	executed     bool //only for If Block
-}
 
 // VM virtual machine
 type VM struct {
@@ -86,9 +62,15 @@ func (vm *VM) Invoke(fidx int64, args ...int64) int64 {
 	}
 
 	vm.setupFrame(int(fidx))
-	ret := vm.interpret()
+	return vm.interpret()
+}
 
-	return int64(ret)
+// GetFunctionIndex look up a function export index by its name
+func (vm *VM) GetFunctionIndex(name string) (int64, bool) {
+	if entry, ok := vm.Module.Export.Entries[name]; ok {
+		return int64(entry.Index), ok
+	}
+	return -1, false
 }
 
 func (vm *VM) interpret() int64 {
@@ -114,22 +96,22 @@ func (vm *VM) interpret() int64 {
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
-			frame.readLEB(32, true)
-			block := NewBlock(-1, Norm)
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeBlock, returnType)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.Loop:
-			frame.readLEB(32, true)
-			block := NewBlock(frame.ip, Loop)
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeLoop, returnType)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.If:
-			frame.readLEB(32, true)
-			block := NewBlock(frame.ip, If)
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeIf, returnType)
 			vm.pushBlock(block)
 			cond := vm.pop()
 			block.executed = (cond != 0)
@@ -138,10 +120,10 @@ func (vm *VM) interpret() int64 {
 			}
 		case op == opcode.Else:
 			ifBlock := vm.popBlock()
-			if ifBlock.blockType != If {
+			if ifBlock.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			block := NewBlock(frame.ip, Else)
+			block := NewBlock(frame.ip, typeElse, ifBlock.returnType)
 			vm.pushBlock(block)
 			if ifBlock.executed {
 				vm.blockJump(0)
@@ -149,7 +131,11 @@ func (vm *VM) interpret() int64 {
 				vm.breakDepth--
 			}
 		case op == opcode.End:
-			vm.popBlock()
+			block := vm.popBlock()
+			if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
+				retVal := castReturnValue(vm.pop(), block.returnType)
+				vm.push(retVal)
+			}
 			vm.breakDepth--
 		case op == opcode.Br:
 			arg := frame.readLEB(32, true)
@@ -276,7 +262,7 @@ func (vm *VM) interpret() int64 {
 			}
 			vm.push(int64(c))
 		default:
-			log.Println("unknown opcode", op)
+			log.Printf("unknown opcode 0x%x\n", op)
 		}
 	}
 }
@@ -297,35 +283,7 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	return true
 }
 
-func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
-	ins := frame.instructions()
-	var (
-		shift  uint32
-		bitcnt uint32
-		cur    int64
-		result int64
-		sign   int64 = -1
-	)
-	for i := frame.ip + 1; i < len(ins); i++ {
-		cur = int64(ins[i])
-		result |= (cur & 0x7f) << shift
-		shift += 7
-		sign <<= 7
-		bitcnt++
-		if cur&0x80 == 0 {
-			break
-		}
-		if bitcnt > (maxbit+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
-		}
-	}
-	if hasSign && ((sign>>1)&result) != 0 {
-		result |= sign
-	}
-	frame.ip += int(bitcnt)
-	return result
-}
-
+// inoperative vm skips instructions if there is at least 1 level of block to break out of
 func (vm *VM) inoperative() bool {
 	return vm.breakDepth > -1
 }
@@ -335,7 +293,7 @@ func (vm *VM) blockJump(breakDepth int) {
 		panic("cannot break out of current function")
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
-	if jumpBlock.blockType == Loop {
+	if jumpBlock.blockType == typeLoop {
 		vm.currentFrame().ip = jumpBlock.labelPointer
 	} else {
 		vm.breakDepth = breakDepth
@@ -390,7 +348,7 @@ func (vm *VM) pushFrame(frame *Frame) {
 func (vm *VM) popFrame() *Frame {
 	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
 	if hasReturn {
-		retVal := vm.peek()
+		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Sig.ReturnTypes[0])
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 		vm.push(retVal)
@@ -413,45 +371,9 @@ func (vm *VM) pushBlock(block *Block) {
 func (vm *VM) popBlock() *Block {
 	vm.blocksIndex--
 	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
-		panic("cannot find matching block openning")
+		panic("cannot find matching block opening")
 	}
 	return vm.blocks[vm.blocksIndex]
-}
-
-// GetFunctionIndex look up a function export index by its name
-func (vm *VM) GetFunctionIndex(name string) (int64, bool) {
-	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return int64(entry.Index), ok
-	}
-	return -1, false
-}
-
-// NewFrame initialize a call frame for a given function fn
-func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
-	f := &Frame{
-		fn:             fn,
-		ip:             -1,
-		basePointer:    basePointer,
-		baseBlockIndex: baseBlockIndex,
-	}
-	return f
-}
-
-// NewBLock initialize a block
-func NewBlock(labelPointer int, blockType BlockType) *Block {
-	b := &Block{
-		labelPointer: labelPointer,
-		blockType:    blockType,
-	}
-	return b
-}
-
-func (frame *Frame) instructions() []byte {
-	return frame.fn.Body.Code
-}
-
-func (frame *Frame) hasEnded() bool {
-	return frame.ip == len(frame.instructions())-1
 }
 
 func (vm *VM) initGlobals() error {
@@ -471,10 +393,5 @@ func (vm *VM) initGlobals() error {
 			vm.globals[i] = int64(math.Float64bits(v))
 		}
 	}
-
 	return nil
-}
-
-func (block *Block) String() string {
-	return fmt.Sprintf("[type: %d, pointer: %d]", block.blockType, block.labelPointer)
 }
