@@ -74,7 +74,6 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 }
 
 func (vm *VM) interpret() uint64 {
-	var retVal uint64
 	for {
 		if vm.currentFrame().hasEnded() {
 			vm.popFrame()
@@ -141,11 +140,11 @@ func (vm *VM) interpret() uint64 {
 			}
 			vm.breakDepth--
 		case op == opcode.Br:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			vm.blockJump(int(arg))
 			continue
 		case op == opcode.BrIf:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			cond := vm.pop()
 			if cond != 0 {
 				vm.blockJump(int(arg))
@@ -154,7 +153,7 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Return:
 			return vm.pop()
 		case op == opcode.Call:
-			fidx := frame.readLEB(32, true)
+			fidx := frame.readLEB(32, false)
 			vm.setupFrame(int(fidx))
 			continue
 		case op == opcode.Drop:
@@ -169,26 +168,25 @@ func (vm *VM) interpret() uint64 {
 				vm.push(first)
 			}
 		case op == opcode.GetLocal:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			frame := vm.currentFrame()
 			vm.push(vm.stack[frame.basePointer+int(arg)])
 		case op == opcode.SetLocal:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			frame := vm.currentFrame()
 			vm.stack[frame.basePointer+int(arg)] = vm.pop()
 		case op == opcode.TeeLocal:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			frame := vm.currentFrame()
 			vm.stack[frame.basePointer+int(arg)] = vm.peek()
 		case op == opcode.GetGlobal:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			vm.push(vm.globals[arg])
 		case op == opcode.SetGlobal:
-			arg := frame.readLEB(32, true)
+			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
 		case op == opcode.I32Const:
-			val, size := readLEB(ins[ip:], 32, false)
-			ip += int(size)
+			val := frame.readLEB(32, true)
 			vm.push(uint64(val))
 		case op == opcode.I32Eqz:
 			if uint32(vm.pop()) == 0 {
@@ -317,8 +315,7 @@ func (vm *VM) interpret() uint64 {
 
 		// I64 Ops
 		case op == opcode.I64Const:
-			val, size := readLEB(ins[ip:], 64, false)
-			ip += int(size)
+			val := frame.readLEB(64, true)
 			vm.push(uint64(val))
 		case op == opcode.I64Eqz:
 			if vm.pop() == 0 {

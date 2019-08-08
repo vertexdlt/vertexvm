@@ -74,15 +74,15 @@ func getVM(name string) *VM {
 
 func TestNeg(t *testing.T) {
 	vm := getVM("i32")
-	fnID, ok := vm.GetFunctionIndex("somefunc")
-	if ok || fnID != -1 {
+	_, ok := vm.GetFunctionIndex("somefunc")
+	if ok {
 		t.Errorf("Expect function index to be -1")
 	}
 }
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		{name: "i32", entry: "calc", params: []uint64{}, expected: -1},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
 		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
 		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
 		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
