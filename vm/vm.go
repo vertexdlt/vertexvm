@@ -126,7 +126,7 @@ func (vm *VM) interpret() uint64 {
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				c = a % b
+				c = uint32(int32(a) % int32(b))
 			case opcode.I32RemU:
 				if b == 0 {
 					panic("integer division by zero")
@@ -184,7 +184,7 @@ func (vm *VM) interpret() uint64 {
 				if b == 0 {
 					panic("integer division by zero")
 				}
-				c = a % b
+				c = uint64(int64(a) % int64(b))
 			case opcode.I64RemU:
 				if b == 0 {
 					panic("integer division by zero")
