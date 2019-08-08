@@ -98,6 +98,12 @@ func (vm *VM) interpret() uint64 {
 			val, size := readLEB(ins[ip:], 32, false)
 			ip += int(size)
 			vm.push(uint64(val))
+		case op == opcode.I32Clz:
+			vm.push(uint64(bits.LeadingZeros32(uint32(vm.pop()))))
+		case op == opcode.I32Ctz:
+			vm.push(uint64(bits.TrailingZeros32(uint32(vm.pop()))))
+		case op == opcode.I32Popcnt:
+			vm.push(uint64(bits.OnesCount32(uint32(vm.pop()))))
 		case opcode.I32Add <= op && op <= opcode.I32Rotr:
 			b := uint32(vm.pop())
 			a := uint32(vm.pop())
@@ -156,6 +162,12 @@ func (vm *VM) interpret() uint64 {
 			val, size := readLEB(ins[ip:], 64, false)
 			ip += int(size)
 			vm.push(uint64(val))
+		case op == opcode.I64Clz:
+			vm.push(uint64(bits.LeadingZeros64(vm.pop())))
+		case op == opcode.I64Ctz:
+			vm.push(uint64(bits.TrailingZeros64(vm.pop())))
+		case op == opcode.I64Popcnt:
+			vm.push(uint64(bits.OnesCount64(vm.pop())))
 		case opcode.I64Add <= op && op <= opcode.I64Rotr:
 			b := vm.pop()
 			a := vm.pop()
