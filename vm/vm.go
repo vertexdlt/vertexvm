@@ -16,12 +16,8 @@ const StackSize = 1024 * 8
 // MaxFrames is the maxinum active frames supported
 const MaxFrames = 1024
 
-// Frame or call frame holds the relevant execution information of a function
-type Frame struct {
-	fn          *wasm.Function
-	ip          int
-	basePointer int
-}
+// MaxBlocks is the maxinum of nested blocks supported
+const MaxBlocks = 1024
 
 // VM virtual machine
 type VM struct {
@@ -31,6 +27,9 @@ type VM struct {
 	frames      []*Frame
 	framesIndex int
 	globals     []uint64
+	blocks      []*Block
+	blocksIndex int
+	breakDepth  int
 }
 
 // NewVM initializes a new VM
@@ -40,17 +39,19 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 	if err != nil {
 		return nil, err
 	}
-	log.Println(m.FunctionIndexSpace)
 
 	vm := &VM{
 		Module:      m,
 		stack:       make([]uint64, StackSize),
 		frames:      make([]*Frame, MaxFrames),
-		globals:     make([]int64, len(m.GlobalIndexSpace)),
+		globals:     make([]uint64, len(m.GlobalIndexSpace)),
 		framesIndex: 0,
 		sp:          0,
+		blocks:      make([]*Block, MaxBlocks),
+		blocksIndex: 0,
+		breakDepth:  -1,
 	}
-	// vm.initGlobals()
+	vm.initGlobals()
 	return vm, nil
 }
 
@@ -61,43 +62,131 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	}
 
 	vm.setupFrame(int(fidx))
-	ret := vm.interpret()
+	return vm.interpret()
+}
 
-	return uint64(ret)
+// GetFunctionIndex look up a function export index by its name
+func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
+	if entry, ok := vm.Module.Export.Entries[name]; ok {
+		return uint64(entry.Index), ok
+	}
+	return 0, false
 }
 
 func (vm *VM) interpret() uint64 {
-	var retVal uint64
 	for {
 		if vm.currentFrame().hasEnded() {
-			hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
-			if hasReturn {
-				retVal = vm.peek()
-				vm.sp = vm.currentFrame().basePointer
-				vm.push(retVal)
-			} else {
-				retVal = 0
-				vm.sp = vm.currentFrame().basePointer
-			}
 			vm.popFrame()
 			if vm.framesIndex == 0 {
-				return retVal
+				if vm.sp > 0 {
+					return vm.pop()
+				}
+				return 0
 			}
 		}
-		vm.currentFrame().ip++
-		ins := vm.currentFrame().instructions()
-		ip := vm.currentFrame().ip
-		log.Println("instructions", ins, ip)
-		op := opcode.Opcode(ins[ip])
-		ip++
+		frame := vm.currentFrame()
+		frame.ip++
+		op := opcode.Opcode(frame.instructions()[frame.ip])
+		if vm.inoperative() && vm.skipInstructions(op) {
+			continue
+		}
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
 
 			// I32 Ops
+		case op == opcode.Nop:
+			continue
+		case op == opcode.Block:
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeBlock, returnType)
+			vm.pushBlock(block)
+			if vm.inoperative() {
+				vm.breakDepth++
+			}
+		case op == opcode.Loop:
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeLoop, returnType)
+			vm.pushBlock(block)
+			if vm.inoperative() {
+				vm.breakDepth++
+			}
+		case op == opcode.If:
+			returnType := wasm.ValueType(frame.readLEB(32, true))
+			block := NewBlock(frame.ip, typeIf, returnType)
+			vm.pushBlock(block)
+			cond := vm.pop()
+			block.executed = (cond != 0)
+			if !block.executed {
+				vm.blockJump(0)
+			}
+		case op == opcode.Else:
+			ifBlock := vm.popBlock()
+			if ifBlock.blockType != typeIf {
+				log.Fatal("No matching If for Else block")
+			}
+			block := NewBlock(frame.ip, typeElse, ifBlock.returnType)
+			vm.pushBlock(block)
+			if ifBlock.executed {
+				vm.blockJump(0)
+			} else {
+				vm.breakDepth--
+			}
+		case op == opcode.End:
+			block := vm.popBlock()
+			if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
+				retVal := castReturnValue(vm.pop(), block.returnType)
+				vm.push(retVal)
+			}
+			vm.breakDepth--
+		case op == opcode.Br:
+			arg := frame.readLEB(32, false)
+			vm.blockJump(int(arg))
+			continue
+		case op == opcode.BrIf:
+			arg := frame.readLEB(32, false)
+			cond := vm.pop()
+			if cond != 0 {
+				vm.blockJump(int(arg))
+			}
+			continue
+		case op == opcode.Return:
+			return vm.pop()
+		case op == opcode.Call:
+			fidx := frame.readLEB(32, false)
+			vm.setupFrame(int(fidx))
+			continue
+		case op == opcode.Drop:
+			vm.pop()
+		case op == opcode.Select:
+			cond := vm.pop()
+			second := vm.pop()
+			first := vm.pop()
+			if cond == 0 {
+				vm.push(second)
+			} else {
+				vm.push(first)
+			}
+		case op == opcode.GetLocal:
+			arg := frame.readLEB(32, false)
+			frame := vm.currentFrame()
+			vm.push(vm.stack[frame.basePointer+int(arg)])
+		case op == opcode.SetLocal:
+			arg := frame.readLEB(32, false)
+			frame := vm.currentFrame()
+			vm.stack[frame.basePointer+int(arg)] = vm.pop()
+		case op == opcode.TeeLocal:
+			arg := frame.readLEB(32, false)
+			frame := vm.currentFrame()
+			vm.stack[frame.basePointer+int(arg)] = vm.peek()
+		case op == opcode.GetGlobal:
+			arg := frame.readLEB(32, false)
+			vm.push(vm.globals[arg])
+		case op == opcode.SetGlobal:
+			arg := frame.readLEB(32, false)
+			vm.globals[arg] = vm.pop()
 		case op == opcode.I32Const:
-			val, size := readLEB(ins[ip:], 32, false)
-			ip += int(size)
+			val := frame.readLEB(32, true)
 			vm.push(uint64(val))
 		case op == opcode.I32Eqz:
 			if uint32(vm.pop()) == 0 {
@@ -226,8 +315,7 @@ func (vm *VM) interpret() uint64 {
 
 		// I64 Ops
 		case op == opcode.I64Const:
-			val, size := readLEB(ins[ip:], 64, false)
-			ip += int(size)
+			val := frame.readLEB(64, true)
 			vm.push(uint64(val))
 		case op == opcode.I64Eqz:
 			if vm.pop() == 0 {
@@ -353,88 +441,59 @@ func (vm *VM) interpret() uint64 {
 				c = bits.RotateLeft64(a, int(-b))
 			}
 			vm.push(c)
-
-		case op == opcode.Return:
-			return vm.pop()
-		case op == opcode.Call:
-			fidx, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			vm.setupFrame(int(fidx))
-			continue
-		case op == opcode.SetLocal:
-			arg, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			frame := vm.currentFrame()
-			vm.stack[frame.basePointer+int(arg)] = vm.pop()
-		case op == opcode.GetLocal:
-			arg, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			frame := vm.currentFrame()
-			vm.push(vm.stack[frame.basePointer+int(arg)])
-		case op == opcode.TeeLocal:
-			arg, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			frame := vm.currentFrame()
-			vm.stack[frame.basePointer+int(arg)] = vm.peek()
-		case op == opcode.GetGlobal:
-			arg, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			vm.push(vm.globals[arg])
-		case op == opcode.SetGlobal:
-			arg, size := readLEB(ins[ip:], 32, true)
-			ip += int(size)
-			vm.globals[arg] = vm.pop()
-		case op == opcode.Drop:
-			vm.pop()
-		case op == opcode.Select:
-			cond := vm.pop()
-			first := vm.pop()
-			second := vm.pop()
-			if cond == 0 {
-				vm.push(second)
-			} else {
-				vm.push(first)
-			}
 		default:
-			log.Println("unknown opcode", op)
+			log.Printf("unknown opcode 0x%x\n", op)
 		}
-		vm.currentFrame().ip = ip - 1
 	}
 }
 
-func readLEB(bytes []byte, maxbit uint32, hasSign bool) (int64, uint32) {
-	var (
-		shift  uint32
-		bitcnt uint32
-		cur    int64
-		result int64
-		sign   int64 = -1
-	)
-	for i := 0; i < len(bytes); i++ {
-		cur = int64(bytes[i])
-		result |= (cur & 0x7f) << shift
-		shift += 7
-		sign <<= 7
-		bitcnt++
-		if cur&0x80 == 0 {
-			break
-		}
-		if bitcnt > (maxbit+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
-		}
+func (vm *VM) skipInstructions(op opcode.Opcode) bool {
+	switch {
+	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
+		return false
+	case op == opcode.Br || op == opcode.BrIf || op == opcode.Call:
+		fallthrough
+	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
+		fallthrough
+	case op == opcode.I32Const:
+		vm.currentFrame().readLEB(32, false)
+	case op == opcode.I64Const:
+		vm.currentFrame().readLEB(64, false)
 	}
-	if hasSign && ((sign>>1)&result) != 0 {
-		result |= sign
+	return true
+}
+
+// inoperative vm skips instructions if there is at least 1 level of block to break out of
+func (vm *VM) inoperative() bool {
+	return vm.breakDepth > -1
+}
+
+func (vm *VM) blockJump(breakDepth int) {
+	if vm.blocksIndex-breakDepth < vm.currentFrame().baseBlockIndex {
+		panic("cannot break out of current function")
 	}
-	return result, bitcnt
+	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
+	if jumpBlock.blockType == typeLoop {
+		vm.currentFrame().ip = jumpBlock.labelPointer
+	} else {
+		vm.breakDepth = breakDepth
+	}
 }
 
 func (vm *VM) setupFrame(fidx int) {
 	fn := vm.Module.GetFunction(fidx)
-	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes))
+	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
+	numLocals := 0
+	for _, entry := range fn.Body.Locals {
+		numLocals += int(entry.Count)
+	}
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Body.Locals) + len(fn.Sig.ParamTypes)
+	vm.sp = frame.basePointer + len(fn.Sig.ParamTypes) + numLocals
+	// uninitialize locals
+	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
+		vm.stack[i] = 0
+	}
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -467,34 +526,34 @@ func (vm *VM) pushFrame(frame *Frame) {
 }
 
 func (vm *VM) popFrame() *Frame {
+	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
+	if hasReturn {
+		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Sig.ReturnTypes[0])
+		vm.sp = vm.currentFrame().basePointer
+		vm.blocksIndex = vm.currentFrame().baseBlockIndex
+		vm.push(retVal)
+	} else {
+		vm.sp = vm.currentFrame().basePointer
+		vm.blocksIndex = vm.currentFrame().baseBlockIndex
+	}
 	vm.framesIndex--
 	return vm.frames[vm.framesIndex]
 }
 
-// GetFunctionIndex look up a function export index by its name
-func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return uint64(entry.Index), ok
+func (vm *VM) pushBlock(block *Block) {
+	if vm.blocksIndex == MaxBlocks {
+		panic("Blocks overflow")
 	}
-	return 0, false
+	vm.blocks[vm.blocksIndex] = block
+	vm.blocksIndex++
 }
 
-// NewFrame initialize a call frame for a given function fn
-func NewFrame(fn *wasm.Function, basePointer int) *Frame {
-	f := &Frame{
-		fn:          fn,
-		ip:          -1,
-		basePointer: basePointer,
+func (vm *VM) popBlock() *Block {
+	vm.blocksIndex--
+	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
+		panic("cannot find matching block opening")
 	}
-	return f
-}
-
-func (frame *Frame) instructions() []byte {
-	return frame.fn.Body.Code
-}
-
-func (frame *Frame) hasEnded() bool {
-	return frame.ip == len(frame.instructions())-1
+	return vm.blocks[vm.blocksIndex]
 }
 
 func (vm *VM) initGlobals() error {
@@ -514,6 +573,5 @@ func (vm *VM) initGlobals() error {
 			vm.globals[i] = uint64(math.Float64bits(v))
 		}
 	}
-
 	return nil
 }

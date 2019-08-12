@@ -1,12 +1,16 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"os/exec"
 	"strconv"
 	"testing"
+
+	wagonExec "github.com/go-interpreter/wagon/exec"
+	wagon "github.com/go-interpreter/wagon/wasm"
 )
 
 type TestSuite struct {
@@ -42,13 +46,82 @@ type vmTest struct {
 	name     string
 	params   []uint64
 	expected uint64
+	entry    string
+}
+
+func getVM(name string) *VM {
+	wat := fmt.Sprintf("./test_data/%s.wat", name)
+	wasm := fmt.Sprintf("./test_data/%s.wasm", name)
+	cmd := exec.Command("wat2wasm", wat, "-o", wasm)
+	err := cmd.Start()
+	if err != nil {
+		panic(err)
+	}
+	err = cmd.Wait()
+	if err != nil {
+		panic(err)
+	}
+	data, err := ioutil.ReadFile(wasm)
+	if err != nil {
+		panic(err)
+	}
+	vm, err := NewVM(data)
+	if err != nil {
+		panic(err)
+	}
+	return vm
+}
+
+func TestNeg(t *testing.T) {
+	vm := getVM("i32")
+	_, ok := vm.GetFunctionIndex("somefunc")
+	if ok {
+		t.Errorf("Expect function index to be -1")
+	}
 }
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		{name: "i32", params: []uint64{}, expected: 0},
-		{name: "local", params: []uint64{2}, expected: 3},
-		{name: "call", params: []uint64{}, expected: 16},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
+		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
+		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
+		{name: "block", entry: "calc", params: []uint64{32}, expected: 16},
+		{name: "block", entry: "calc", params: []uint64{30}, expected: 8},
+		{name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
+		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
+		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
+		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
+		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
+		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
+	}
+	for _, test := range tests {
+		vm := getVM(test.name)
+		fnID, ok := vm.GetFunctionIndex(test.entry)
+		if !ok {
+			t.Error("cannot get function export")
+		}
+		ret := vm.Invoke(fnID, test.params...)
+		if ret != test.expected {
+			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
+		}
+	}
+}
+
+func TestVM2(t *testing.T) {
+	tests := []vmTest{
+		// {name: "i32", entry: "calc", params: []int64{}, expected: -1},
+		// {name: "local", entry: "calc", params: []int64{2}, expected: 3},
+		// {name: "call", entry: "calc", params: []int64{}, expected: 16},
+		// {name: "select", entry: "calc", params: []int64{5}, expected: 3},
+		// {name: "block", entry: "calc", params: []int64{32}, expected: 16},
+		// {name: "block", entry: "calc", params: []int64{30}, expected: 8},
+		// {name: "loop", entry: "calc", params: []int64{30}, expected: 435},
+		// {name: "ifelse", entry: "calc", params: []int64{1}, expected: 5},
+		// {name: "ifelse", entry: "calc", params: []int64{0}, expected: 7},
+		// {name: "loop", entry: "isPrime", params: []int64{6}, expected: 2},
+		// {name: "loop", entry: "isPrime", params: []int64{9}, expected: 3},
+		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
 	}
 	for _, test := range tests {
 		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
@@ -68,16 +141,12 @@ func TestVM(t *testing.T) {
 		if err != nil {
 			panic(err)
 		}
-		vm, err := NewVM(data)
-		if err != nil {
-			panic(err)
-		}
-		fnID, ok := vm.GetFunctionIndex("calc")
-		if !ok {
-			t.Error("cannot get function export")
-		}
-		ret := vm.Invoke(fnID, test.params...)
-		if ret != test.expected {
+		m, err := wagon.ReadModule(bytes.NewReader(data), nil)
+		findex := int64(m.Export.Entries[test.entry].Index)
+		vm, err := wagonExec.NewVM(m)
+		ret, err := vm.ExecCode(findex, uint64(test.params[0]))
+		casted := ret.(uint32)
+		if casted != uint32(test.expected) {
 			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
 		}
 	}
