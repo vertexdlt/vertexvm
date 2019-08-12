@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -75,18 +76,24 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 
 func (vm *VM) interpret() uint64 {
 	for {
-		if vm.currentFrame().hasEnded() {
-			vm.popFrame()
-			if vm.framesIndex == 0 {
-				if vm.sp > 0 {
-					return vm.pop()
+		for {
+			if vm.currentFrame().hasEnded() {
+				fmt.Println("pop frame", vm.framesIndex-1)
+				vm.popFrame()
+				if vm.framesIndex == 0 {
+					if vm.sp > 0 {
+						return vm.pop()
+					}
+					return 0
 				}
-				return 0
+			} else {
+				break
 			}
 		}
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
+		fmt.Printf("op %d 0x%x\n", op, op)
 		if vm.inoperative() && vm.skipInstructions(op) {
 			continue
 		}
@@ -154,6 +161,16 @@ func (vm *VM) interpret() uint64 {
 			return vm.pop()
 		case op == opcode.Call:
 			fidx := frame.readLEB(32, false)
+			vm.setupFrame(int(fidx))
+			continue
+		case op == opcode.CallIndirect:
+			frame.readLEB(32, false)
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
+			eidx := vm.pop()
+			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) {
+				log.Fatal("Out of bound table access")
+			}
+			fidx := vm.Module.TableIndexSpace[0][eidx]
 			vm.setupFrame(int(fidx))
 			continue
 		case op == opcode.Drop:
@@ -459,6 +476,9 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 		vm.currentFrame().readLEB(32, false)
 	case op == opcode.I64Const:
 		vm.currentFrame().readLEB(64, false)
+	case op == opcode.CallIndirect:
+		vm.currentFrame().readLEB(32, false)
+		vm.currentFrame().readLEB(1, false)
 	}
 	return true
 }
@@ -494,6 +514,7 @@ func (vm *VM) setupFrame(fidx int) {
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
 	}
+	fmt.Println("Instructions", frame.instructions())
 }
 
 func (vm *VM) currentFrame() *Frame {
