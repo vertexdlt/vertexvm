@@ -229,7 +229,7 @@ func TestWasmSuite(t *testing.T) {
 						}
 
 						if ret != exp {
-							t.Errorf("Expect return value to be %d, got %d", exp, ret)
+							t.Errorf("Test %s: Expect return value to be %d, got %d", name, exp, ret)
 						}
 					}
 				default:

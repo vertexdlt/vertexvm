@@ -2,7 +2,6 @@ package vm
 
 import (
 	"bytes"
-	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -14,11 +13,14 @@ import (
 // StackSize is the VM stack depth
 const StackSize = 1024 * 8
 
-// MaxFrames is the maxinum active frames supported
+// MaxFrames is the maximum active frames supported
 const MaxFrames = 1024
 
-// MaxBlocks is the maxinum of nested blocks supported
+// MaxBlocks is the maximum of nested blocks supported
 const MaxBlocks = 1024
+
+// MaxBrTableSize is the maximum number of br_table targets
+const MaxBrTableSize = 8 * 1024
 
 // VM virtual machine
 type VM struct {
@@ -78,7 +80,7 @@ func (vm *VM) interpret() uint64 {
 	for {
 		for {
 			if vm.currentFrame().hasEnded() {
-				fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
+				// fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
 				vm.popFrame()
 				if vm.framesIndex == 0 {
 					if vm.sp > 0 {
@@ -93,7 +95,7 @@ func (vm *VM) interpret() uint64 {
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
-		fmt.Printf("op %d 0x%x\n", op, op)
+		// fmt.Printf("op %d 0x%x\n", op, op)
 		if vm.inoperative() && vm.skipInstructions(op) {
 			continue
 		}
@@ -161,6 +163,9 @@ func (vm *VM) interpret() uint64 {
 			targetIndex := int(vm.pop())
 			targetCount := int(frame.readLEB(32, false))
 			targetDepth := -1
+			if targetCount > MaxBrTableSize {
+				panic("Too many br_table targets")
+			}
 			for i := 0; i < targetCount+1; i++ { // +1 for default target
 				depth := int(frame.readLEB(32, false))
 				if i == targetIndex || i == targetCount {
@@ -179,13 +184,16 @@ func (vm *VM) interpret() uint64 {
 			vm.setupFrame(int(fidx))
 			continue
 		case op == opcode.CallIndirect:
-			frame.readLEB(32, false)
+			sigIndex := frame.readLEB(32, false)
+			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
+
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
 			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) {
 				log.Fatal("Out of bound table access")
 			}
-			fidx := vm.Module.TableIndexSpace[0][eidx]
+			fidx := int(vm.Module.TableIndexSpace[0][eidx])
+			vm.assertFuncSig(fidx, &expectedFuncSig)
 			vm.setupFrame(int(fidx))
 			continue
 		case op == opcode.Drop:
@@ -510,6 +518,9 @@ func (vm *VM) inoperative() bool {
 }
 
 func (vm *VM) blockJump(breakDepth int) {
+	if breakDepth < 0 {
+		panic("Invalid break depth")
+	}
 	if vm.blocksIndex-breakDepth < vm.currentFrame().baseBlockIndex {
 		panic("cannot break out of current function")
 	} else if vm.blocksIndex-breakDepth == vm.currentFrame().baseBlockIndex {
@@ -538,7 +549,7 @@ func (vm *VM) setupFrame(fidx int) {
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
 	}
-	fmt.Println("Instructions", frame.instructions())
+	// fmt.Println("Instructions", frame.instructions())
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -620,4 +631,22 @@ func (vm *VM) initGlobals() error {
 		}
 	}
 	return nil
+}
+
+func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
+	signature := vm.Module.GetFunction(fidx).Sig
+	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
+		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
+		panic("Mismatch function signature")
+	}
+	for i, paramType := range signature.ParamTypes {
+		if paramType != expectedSignature.ParamTypes[i] {
+			panic("Mismatch function signature")
+		}
+	}
+	for i, returnType := range signature.ReturnTypes {
+		if returnType != expectedSignature.ReturnTypes[i] {
+			panic("Mismatch function signature")
+		}
+	}
 }
