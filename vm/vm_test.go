@@ -81,8 +81,9 @@ func TestNeg(t *testing.T) {
 }
 
 func TestVM(t *testing.T) {
+	int32minusone := -1
 	tests := []vmTest{
-		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: uint64(int32minusone)},
 		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
 		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
 		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
@@ -98,6 +99,7 @@ func TestVM(t *testing.T) {
 		{name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
 		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
 		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
+		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name)
@@ -109,7 +111,7 @@ func TestVM(t *testing.T) {
 		}
 		ret := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
-			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
+			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
 		}
 	}
 }

@@ -78,7 +78,7 @@ func (vm *VM) interpret() uint64 {
 	for {
 		for {
 			if vm.currentFrame().hasEnded() {
-				fmt.Println("pop frame", vm.framesIndex-1)
+				fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
 				vm.popFrame()
 				if vm.framesIndex == 0 {
 					if vm.sp > 0 {
@@ -172,7 +172,8 @@ func (vm *VM) interpret() uint64 {
 			vm.blockJump(targetDepth)
 			continue
 		case op == opcode.Return:
-			return vm.pop()
+			// TODO validate jump
+			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
 			fidx := frame.readLEB(32, false)
 			vm.setupFrame(int(fidx))
@@ -511,6 +512,9 @@ func (vm *VM) inoperative() bool {
 func (vm *VM) blockJump(breakDepth int) {
 	if vm.blocksIndex-breakDepth < vm.currentFrame().baseBlockIndex {
 		panic("cannot break out of current function")
+	} else if vm.blocksIndex-breakDepth == vm.currentFrame().baseBlockIndex {
+		vm.breakDepth = breakDepth
+		return
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
 	if jumpBlock.blockType == typeLoop {
@@ -577,6 +581,7 @@ func (vm *VM) popFrame() *Frame {
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 	}
+	vm.breakDepth = -1 // return reset
 	vm.framesIndex--
 	return vm.frames[vm.framesIndex]
 }
