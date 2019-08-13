@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/chewxy/math32"
 	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
 )
@@ -18,6 +19,8 @@ const MaxFrames = 1024
 
 // MaxBlocks is the maxinum of nested blocks supported
 const MaxBlocks = 1024
+
+const f32SignMask = 1 << 31
 
 // VM virtual machine
 type VM struct {
@@ -94,7 +97,6 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
 
-			// I32 Ops
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
@@ -185,6 +187,8 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.SetGlobal:
 			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
+
+		// I32 Ops
 		case op == opcode.I32Const:
 			val := frame.readLEB(32, true)
 			vm.push(uint64(val))
@@ -441,6 +445,113 @@ func (vm *VM) interpret() uint64 {
 				c = bits.RotateLeft64(a, int(-b))
 			}
 			vm.push(c)
+
+		// F32 Ops
+		case op == opcode.F32Const:
+			val := frame.readLEB(32, true)
+			vm.push(uint64(val))
+		case opcode.F32Eq <= op && op <= opcode.F32Ge:
+			b := math.Float32frombits(uint32(vm.pop()))
+			a := math.Float32frombits(uint32(vm.pop()))
+			var c uint64
+			switch op {
+			case opcode.F32Eq:
+				if a == b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F32Ne:
+				if a == b {
+					c = 0
+				} else {
+					c = 1
+				}
+			case opcode.F32Lt:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F32Gt:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F32Le:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F32Ge:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			}
+			vm.push(c)
+
+		case opcode.F32Add <= op && op <= opcode.F32Copysign:
+			bBits := uint32(vm.pop())
+			b := math.Float32frombits(bBits)
+			aBits := uint32(vm.pop())
+			a := math.Float32frombits(aBits)
+			var cBits uint32
+			switch op {
+			case opcode.F32Add:
+				cBits = math.Float32bits(a + b)
+			case opcode.F32Sub:
+				cBits = math.Float32bits(a - b)
+			case opcode.F32Mul:
+				cBits = math.Float32bits(a * b)
+			case opcode.F32Div:
+				cBits = math.Float32bits(a / b)
+			case opcode.F32Min:
+				cBits = aBits
+				if a > b || (a == b && bBits&f32SignMask != 0) {
+					cBits = bBits
+				}
+			case opcode.F32Max:
+				cBits = aBits
+				if a < b || (a == b && bBits&f32SignMask == 0) {
+					cBits = bBits
+				}
+			case opcode.F32Copysign:
+				cBits = math.Float32bits(a)&^f32SignMask | math.Float32bits(b)&f32SignMask
+			}
+			vm.push(uint64(cBits))
+
+		case opcode.F32Abs <= op && op <= opcode.F32Sqrt:
+			fBits := uint32(vm.pop())
+			f := math.Float32frombits(fBits)
+			var rBits uint32
+			switch op {
+			case opcode.F32Abs:
+				rBits = fBits &^ f32SignMask
+			case opcode.F32Neg:
+				rBits = fBits ^ f32SignMask
+			case opcode.F32Ceil:
+				rBits = math.Float32bits(math32.Ceil(f))
+			case opcode.F32Floor:
+				rBits = math.Float32bits(math32.Floor(f))
+			case opcode.F32Trunc:
+				rBits = math.Float32bits(math32.Trunc(f))
+			case opcode.F32Nearest:
+				t := math32.Trunc(f)
+				odd := math32.Remainder(t, 2) != 0
+				if d := math32.Abs(f - t); d > 0.5 || (d == 0.5 && odd) {
+					t = t + math32.Copysign(1, f)
+				}
+				rBits = math.Float32bits(t)
+			case opcode.F32Sqrt:
+				rBits = math.Float32bits(math32.Sqrt(f))
+			}
+
+			vm.push(uint64(rBits))
+
 		default:
 			log.Printf("unknown opcode 0x%x\n", op)
 		}
