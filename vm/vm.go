@@ -552,6 +552,98 @@ func (vm *VM) interpret() uint64 {
 
 			vm.push(uint64(rBits))
 
+		// F64 Ops
+		case op == opcode.F64Const:
+			val := frame.readLEB(64, true)
+			vm.push(uint64(val))
+		case opcode.F64Eq <= op && op <= opcode.F64Ge:
+			b := math.Float64frombits(vm.pop())
+			a := math.Float64frombits(vm.pop())
+			var c uint64
+			switch op {
+			case opcode.F64Eq:
+				if a == b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F64Ne:
+				if a == b {
+					c = 0
+				} else {
+					c = 1
+				}
+			case opcode.F64Lt:
+				if a < b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F64Gt:
+				if a > b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F64Le:
+				if a <= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			case opcode.F64Ge:
+				if a >= b {
+					c = 1
+				} else {
+					c = 0
+				}
+			}
+			vm.push(c)
+
+		case opcode.F64Add <= op && op <= opcode.F64Copysign:
+			b := math.Float64frombits(vm.pop())
+			a := math.Float64frombits(vm.pop())
+			var c float64
+			switch op {
+			case opcode.F64Add:
+				c = a + b
+			case opcode.F64Sub:
+				c = a - b
+			case opcode.F64Mul:
+				c = a * b
+			case opcode.F64Div:
+				c = a / b
+			case opcode.F64Min:
+				c = math.Min(a, b)
+			case opcode.F64Max:
+				c = math.Max(a, b)
+			case opcode.F64Copysign:
+				c = math.Copysign(a, b)
+			}
+			vm.push(math.Float64bits(c))
+
+		case opcode.F64Abs <= op && op <= opcode.F64Sqrt:
+			f := math.Float64frombits(vm.pop())
+			var r float64
+			switch op {
+			case opcode.F64Abs:
+				r = math.Abs(f)
+			case opcode.F64Neg:
+				r = -f
+			case opcode.F64Ceil:
+				r = math.Ceil(f)
+			case opcode.F64Floor:
+				r = math.Floor(f)
+			case opcode.F64Trunc:
+				r = math.Trunc(f)
+			case opcode.F64Nearest:
+				r = math.RoundToEven(f)
+			case opcode.F64Sqrt:
+				r = math.Sqrt(f)
+			}
+
+			vm.push(math.Float64bits(r))
+
 		default:
 			log.Printf("unknown opcode 0x%x\n", op)
 		}

@@ -153,7 +153,7 @@ func TestVM2(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise"}
+	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise"}
 	for _, name := range tests {
 		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)
