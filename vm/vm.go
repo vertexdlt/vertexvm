@@ -157,6 +157,20 @@ func (vm *VM) interpret() uint64 {
 				vm.blockJump(int(arg))
 			}
 			continue
+		case op == opcode.BrTable:
+			targetIndex := int(vm.pop())
+			targetCount := int(frame.readLEB(32, false))
+			targetDepth := -1
+			for i := 0; i < targetCount+1; i++ { // +1 for default target
+				depth := int(frame.readLEB(32, false))
+				if i == targetIndex || i == targetCount {
+					if targetDepth == -1 { // uninitialized
+						targetDepth = depth
+					}
+				}
+			}
+			vm.blockJump(targetDepth)
+			continue
 		case op == opcode.Return:
 			return vm.pop()
 		case op == opcode.Call:
@@ -465,6 +479,7 @@ func (vm *VM) interpret() uint64 {
 }
 
 func (vm *VM) skipInstructions(op opcode.Opcode) bool {
+	frame := vm.currentFrame()
 	switch {
 	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
 		return false
@@ -473,12 +488,17 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
 		fallthrough
 	case op == opcode.I32Const:
-		vm.currentFrame().readLEB(32, false)
+		frame.readLEB(32, false)
 	case op == opcode.I64Const:
-		vm.currentFrame().readLEB(64, false)
+		frame.readLEB(64, false)
 	case op == opcode.CallIndirect:
-		vm.currentFrame().readLEB(32, false)
-		vm.currentFrame().readLEB(1, false)
+		frame.readLEB(32, false)
+		frame.readLEB(1, false)
+	case op == opcode.BrTable:
+		targetCount := int(frame.readLEB(32, false))
+		for i := 0; i < targetCount+1; i++ {
+			frame.readLEB(32, false)
+		}
 	}
 	return true
 }

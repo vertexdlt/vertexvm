@@ -82,19 +82,22 @@ func TestNeg(t *testing.T) {
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		// {name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
-		// {name: "local", entry: "calc", params: []uint64{2}, expected: 3},
-		// {name: "call", entry: "calc", params: []uint64{}, expected: 16},
-		// {name: "select", entry: "calc", params: []uint64{5}, expected: 3},
-		// {name: "block", entry: "calc", params: []uint64{32}, expected: 16},
-		// {name: "block", entry: "calc", params: []uint64{30}, expected: 8},
-		// {name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
-		// {name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
-		// {name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
-		// {name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
-		// {name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
-		// {name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
+		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
+		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
+		{name: "block", entry: "calc", params: []uint64{32}, expected: 16},
+		{name: "block", entry: "calc", params: []uint64{30}, expected: 8},
+		{name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
+		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
+		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
+		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
+		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
+		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
 		{name: "call_indirect", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
+		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name)
