@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"encoding/binary"
 	"log"
 
 	"github.com/go-interpreter/wagon/wasm"
@@ -60,4 +61,16 @@ func (frame *Frame) instructions() []byte {
 
 func (frame *Frame) hasEnded() bool {
 	return frame.ip == len(frame.instructions())-1
+}
+
+func (frame *Frame) readUint32() uint32 {
+	data := frame.instructions()[frame.ip+1 : frame.ip+5]
+	frame.ip += 4
+	return binary.LittleEndian.Uint32(data)
+}
+
+func (frame *Frame) readUint64() uint64 {
+	data := frame.instructions()[frame.ip+1 : frame.ip+9]
+	frame.ip += 8
+	return binary.LittleEndian.Uint64(data)
 }
