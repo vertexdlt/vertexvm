@@ -448,7 +448,7 @@ func (vm *VM) interpret() uint64 {
 
 		// F32 Ops
 		case op == opcode.F32Const:
-			val := frame.readLEB(32, true)
+			val := frame.readUint32()
 			vm.push(uint64(val))
 		case opcode.F32Eq <= op && op <= opcode.F32Ge:
 			b := math.Float32frombits(uint32(vm.pop()))
@@ -554,7 +554,7 @@ func (vm *VM) interpret() uint64 {
 
 		// F64 Ops
 		case op == opcode.F64Const:
-			val := frame.readLEB(64, true)
+			val := frame.readUint64()
 			vm.push(uint64(val))
 		case opcode.F64Eq <= op && op <= opcode.F64Ge:
 			b := math.Float64frombits(vm.pop())
