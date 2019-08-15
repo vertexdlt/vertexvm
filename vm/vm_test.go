@@ -81,9 +81,8 @@ func TestNeg(t *testing.T) {
 }
 
 func TestVM(t *testing.T) {
-	int32minusone := -1
 	tests := []vmTest{
-		{name: "i32", entry: "calc", params: []uint64{}, expected: uint64(int32minusone)},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
 		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
 		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
 		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
@@ -161,7 +160,7 @@ func TestVM2(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise"}
+	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "br", "br_if", "br_table"}
 	for _, name := range tests {
 		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)

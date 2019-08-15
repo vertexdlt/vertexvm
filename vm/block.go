@@ -16,16 +16,18 @@ const (
 type Block struct {
 	labelPointer int //only for Loop Block
 	blockType    BlockType
-	executed     bool //only for If Block
+	executeElse  bool //only for If Block
 	returnType   wasm.ValueType
+	basePointer  int
 }
 
 // NewBlock initialize a block
-func NewBlock(labelPointer int, blockType BlockType, returnType wasm.ValueType) *Block {
+func NewBlock(labelPointer int, blockType BlockType, returnType wasm.ValueType, basePointer int) *Block {
 	b := &Block{
 		labelPointer: labelPointer,
 		blockType:    blockType,
 		returnType:   returnType,
+		basePointer:  basePointer,
 	}
 	return b
 }

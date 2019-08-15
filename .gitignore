@@ -26,3 +26,4 @@ data/
 vm/test_data/*.wasm
 vm/test_suite/*.wasm
 vm/test_suite/*.json
+vm/test_suite/*.wat

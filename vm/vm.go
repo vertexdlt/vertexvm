@@ -21,7 +21,7 @@ const MaxFrames = 1024
 const MaxBlocks = 1024
 
 // MaxBrTableSize is the maximum number of br_table targets
-const MaxBrTableSize = 8 * 1024
+const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
@@ -110,44 +110,57 @@ func (vm *VM) interpret() uint64 {
 			continue
 		case op == opcode.Block:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeBlock, returnType)
+			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.Loop:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeLoop, returnType)
+			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.If:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeIf, returnType)
+			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
-			cond := vm.pop()
-			block.executed = (cond != 0)
-			if !block.executed {
-				vm.blockJump(0)
+			block.executeElse = false
+			if !vm.inoperative() {
+				cond := vm.pop()
+				block.executeElse = (cond == 0)
+				if block.executeElse {
+					vm.blockJump(0)
+				}
 			}
 		case op == opcode.Else:
 			ifBlock := vm.popBlock()
 			if ifBlock.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			block := NewBlock(frame.ip, typeElse, ifBlock.returnType)
+			block := NewBlock(frame.ip, typeElse, ifBlock.returnType, ifBlock.basePointer)
 			vm.pushBlock(block)
-			if ifBlock.executed {
-				vm.blockJump(0)
-			} else {
+			// todo: consider removing Else block
+			if ifBlock.executeElse {
+				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
+			}
+			if !vm.inoperative() {
+				if !ifBlock.executeElse {
+					vm.blockJump(0)
+				}
 			}
 		case op == opcode.End:
 			block := vm.popBlock()
-			if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
-				retVal := castReturnValue(vm.pop(), block.returnType)
-				vm.push(retVal)
+			if block.basePointer < vm.sp {
+				if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
+					retVal := castReturnValue(vm.pop(), block.returnType)
+					vm.push(retVal)
+				}
+				ret := vm.pop()
+				vm.sp = block.basePointer
+				vm.push(ret)
 			}
 			vm.breakDepth--
 		case op == opcode.Br:
