@@ -9,7 +9,6 @@ const (
 	typeBlock BlockType = iota + 1
 	typeLoop
 	typeIf
-	typeElse
 )
 
 // Block holds information related to a WASM block structure

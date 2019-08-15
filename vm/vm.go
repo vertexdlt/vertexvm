@@ -135,19 +135,16 @@ func (vm *VM) interpret() uint64 {
 				}
 			}
 		case op == opcode.Else:
-			ifBlock := vm.popBlock()
-			if ifBlock.blockType != typeIf {
+			block := vm.blocks[vm.blocksIndex-1]
+			if block.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			block := NewBlock(frame.ip, typeElse, ifBlock.returnType, ifBlock.basePointer)
-			vm.pushBlock(block)
-			// todo: consider removing Else block
-			if ifBlock.executeElse {
+			if block.executeElse {
 				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
 			}
 			if !vm.inoperative() {
-				if !ifBlock.executeElse {
+				if !block.executeElse {
 					vm.blockJump(0)
 				}
 			}
