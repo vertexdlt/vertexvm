@@ -637,6 +637,115 @@ func (vm *VM) interpret() uint64 {
 
 			vm.push(math.Float64bits(r))
 
+		// Conversion
+		case op == opcode.I32WrapI64:
+			vm.push(uint64(uint32(vm.pop())))
+		case op == opcode.I32TruncSF32:
+			f := math.Float32frombits(uint32(vm.pop()))
+			if math.IsNaN(float64(f)) {
+				panic("invalid conversion to integer")
+			} else if f < math.MinInt32 || f > math.MaxInt32 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(uint32(int32(f))))
+		case op == opcode.I32TruncUF32:
+			i := uint32(vm.pop())
+			f := math.Float32frombits(i)
+			if math.IsNaN(float64(f)) {
+				panic("invalid conversion to integer")
+			} else if f > math.MaxUint32 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(uint32(f)))
+		case op == opcode.I32TruncSF64:
+			f := math.Float64frombits(vm.pop())
+			if math.IsNaN(f) {
+				panic("invalid conversion to integer")
+			} else if f < math.MinInt32 || f > math.MaxInt32 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(uint32(int32(f))))
+		case op == opcode.I32TruncUF64:
+			f := math.Float64frombits(vm.pop())
+			if math.IsNaN(f) {
+				panic("invalid conversion to integer")
+			} else if f > math.MaxUint32 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(uint32(f)))
+		case op == opcode.I64ExtendSI32:
+			vm.push(uint64(int64(int32(uint32(vm.pop())))))
+		case op == opcode.I64ExtendUI32:
+			vm.push(uint64(uint32(vm.pop())))
+		case op == opcode.I64TruncSF32:
+			f := math.Float32frombits(uint32(vm.pop()))
+			if math.IsNaN(float64(f)) {
+				panic("invalid conversion to integer")
+			} else if f < math.MinInt64 || f > math.MaxInt64 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(int64(f)))
+		case op == opcode.I64TruncUF32:
+			f := math.Float32frombits(uint32(vm.pop()))
+			if math.IsNaN(float64(f)) {
+				panic("invalid conversion to integer")
+			} else if f > math.MaxUint64 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(f))
+		case op == opcode.I64TruncSF64:
+			f := math.Float64frombits(vm.pop())
+			if math.IsNaN(f) {
+				panic("invalid conversion to integer")
+			} else if f < math.MinInt64 || f > math.MaxInt64 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(int64(f)))
+		case op == opcode.I64TruncUF64:
+			f := math.Float64frombits(vm.pop())
+			if math.IsNaN(f) {
+				panic("invalid conversion to integer")
+			} else if f > math.MaxUint64 {
+				panic("integer overflow")
+			}
+			vm.push(uint64(f))
+		case op == opcode.F32ConvertSI32:
+			i := int32(uint32(vm.pop()))
+			vm.push(uint64(math.Float32bits(float32(i))))
+		case op == opcode.F32ConvertUI32:
+			i := uint32(vm.pop())
+			vm.push(uint64(math.Float32bits(float32(i))))
+		case op == opcode.F32ConvertSI64:
+			i := int64(vm.pop())
+			vm.push(uint64(math.Float32bits(float32(i))))
+		case op == opcode.F32ConvertUI64:
+			i := uint64(vm.pop())
+			vm.push(uint64(math.Float32bits(float32(i))))
+
+		case op == opcode.F64ConvertSI32:
+			i := int32(uint32(vm.pop()))
+			vm.push(uint64(math.Float64bits(float64(i))))
+		case op == opcode.F64ConvertUI32:
+			i := uint32(vm.pop())
+			vm.push(uint64(math.Float64bits(float64(i))))
+		case op == opcode.F64ConvertSI64:
+			i := int64(vm.pop())
+			vm.push(uint64(math.Float64bits(float64(i))))
+		case op == opcode.F64ConvertUI64:
+			i := uint64(vm.pop())
+			vm.push(uint64(math.Float64bits(float64(i))))
+
+		case op == opcode.F32DemoteF64:
+			f := math.Float64frombits(vm.pop())
+			vm.push(uint64(math.Float32bits(float32(f))))
+
+		case op == opcode.F64PromoteF32:
+			f := math.Float32frombits(uint32(vm.pop()))
+			vm.push(math.Float64bits(float64(f)))
+
+		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
+			// Do nothing
+
 		default:
 			log.Printf("unknown opcode 0x%x\n", op)
 		}
