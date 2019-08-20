@@ -153,7 +153,7 @@ func TestVM2(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	tests := []string{"i32", "i64"}
+	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise"}
 	for _, name := range tests {
 		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)
@@ -227,7 +227,7 @@ func TestWasmSuite(t *testing.T) {
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
-			case "assert_trap", "assert_invalid":
+			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan":
 				t.Logf("%s not supported", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)
