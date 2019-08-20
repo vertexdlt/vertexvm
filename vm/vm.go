@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/bits"
 
-	"github.com/chewxy/math32"
 	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
 )
@@ -575,32 +574,26 @@ func (vm *VM) interpret() uint64 {
 			vm.push(uint64(cBits))
 
 		case opcode.F32Abs <= op && op <= opcode.F32Sqrt:
-			fBits := uint32(vm.pop())
-			f := math.Float32frombits(fBits)
-			var rBits uint32
+			f := float64(math.Float32frombits(uint32(vm.pop())))
+			var r float64
 			switch op {
 			case opcode.F32Abs:
-				rBits = fBits &^ f32SignMask
+				r = math.Abs(f)
 			case opcode.F32Neg:
-				rBits = fBits ^ f32SignMask
+				r = -f
 			case opcode.F32Ceil:
-				rBits = math.Float32bits(math32.Ceil(f))
+				r = math.Ceil(f)
 			case opcode.F32Floor:
-				rBits = math.Float32bits(math32.Floor(f))
+				r = math.Floor(f)
 			case opcode.F32Trunc:
-				rBits = math.Float32bits(math32.Trunc(f))
+				r = math.Trunc(f)
 			case opcode.F32Nearest:
-				t := math32.Trunc(f)
-				odd := math32.Remainder(t, 2) != 0
-				if d := math32.Abs(f - t); d > 0.5 || (d == 0.5 && odd) {
-					t = t + math32.Copysign(1, f)
-				}
-				rBits = math.Float32bits(t)
+				r = math.RoundToEven(f)
 			case opcode.F32Sqrt:
-				rBits = math.Float32bits(math32.Sqrt(f))
+				r = math.Sqrt(f)
 			}
 
-			vm.push(uint64(rBits))
+			vm.push(uint64(math.Float32bits(float32(r))))
 
 		// F64 Ops
 		case op == opcode.F64Const:
