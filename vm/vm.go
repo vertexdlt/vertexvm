@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"log"
 	"math"
 	"math/bits"
@@ -25,6 +26,8 @@ const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
+const wasmPageSize = 64 * 1024
+
 // VM virtual machine
 type VM struct {
 	Module      *wasm.Module
@@ -36,6 +39,7 @@ type VM struct {
 	blocks      []*Block
 	blocksIndex int
 	breakDepth  int
+	memory      []byte
 }
 
 // NewVM initializes a new VM
@@ -56,7 +60,14 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 		blocks:      make([]*Block, MaxBlocks),
 		blocksIndex: 0,
 		breakDepth:  -1,
+		memory:      make([]byte, wasmPageSize),
 	}
+
+	if m.Memory != nil && len(m.Memory.Entries) != 0 {
+		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
+		copy(vm.memory, m.LinearMemoryIndexSpace[0])
+	}
+
 	vm.initGlobals()
 	return vm, nil
 }
@@ -237,7 +248,68 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.SetGlobal:
 			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
-
+		case opcode.I32Load <= op && op <= opcode.I64Load32U:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			//todo inbound access check
+			switch op {
+			case opcode.I32Load, opcode.F32Load:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load, opcode.F64Load:
+				v := binary.LittleEndian.Uint64(curMem)
+				vm.push(v)
+			case opcode.I32Load8S, opcode.I64Load8S:
+				vm.push(uint64(int8(vm.memory[address])))
+			case opcode.I32Load8U, opcode.I64Load8U:
+				vm.push(uint64(vm.memory[address]))
+			case opcode.I32Load16S, opcode.I64Load16S:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(int16(v)))
+			case opcode.I32Load16U, opcode.I64Load16U:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load32S:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(int32(v)))
+			case opcode.I64Load32U:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			}
+		case opcode.I32Store <= op && op <= opcode.I64Store32:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			v := vm.pop()
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			switch op {
+			case opcode.I32Store, opcode.F32Store:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			case opcode.I64Store, opcode.F64Store:
+				binary.LittleEndian.PutUint64(curMem, v)
+			case opcode.I32Store8, opcode.I64Store8:
+				vm.memory[address] = byte(v)
+			case opcode.I32Store16, opcode.I64Store16:
+				binary.LittleEndian.PutUint16(curMem, uint16(v))
+			case opcode.I64Store32:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			}
+		case op == opcode.MemorySize:
+			frame.readLEB(32, false)
+			pages := len(vm.memory) / wasmPageSize
+			vm.push(uint64(pages))
+		case op == opcode.MemoryGrow:
+			frame.readLEB(32, false)
+			pages := len(vm.memory) / wasmPageSize
+			requested := vm.pop()
+			vm.memory = append(vm.memory, make([]byte, requested*wasmPageSize)...)
+			vm.push(uint64(pages))
+		case op == opcode.F64ReinterpretI64:
+			vm.push(math.Float64bits(math.Float64frombits(vm.pop())))
 		// I32 Ops
 		case op == opcode.I32Const:
 			val := frame.readLEB(32, true)
