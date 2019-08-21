@@ -160,7 +160,7 @@ func TestVM2(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	// tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "br", "br_if", "br_table"}
+	// tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "br", "br_if", "br_table", "conversions"}
 	// tests := []string{"memory", "memory_grow", "memory_size"}
 	tests := []string{"call"}
 
