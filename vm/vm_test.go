@@ -65,7 +65,7 @@ func getVM(name string) *VM {
 	if err != nil {
 		panic(err)
 	}
-	vm, err := NewVM(data)
+	vm, err := NewVM(data, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -161,7 +161,8 @@ func TestVM2(t *testing.T) {
 
 func TestWasmSuite(t *testing.T) {
 	// tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "br", "br_if", "br_table"}
-	tests := []string{"memory", "memory_size"}
+	// tests := []string{"memory", "memory_grow", "memory_size"}
+	tests := []string{"call"}
 
 	for _, name := range tests {
 		t.Logf("Test suite %s", name)
@@ -194,7 +195,7 @@ func TestWasmSuite(t *testing.T) {
 				if err != nil {
 					panic(err)
 				}
-				vm, err = NewVM(data)
+				vm, err = NewVM(data, cmd.Line)
 				if err != nil {
 					panic(err)
 				}
@@ -213,10 +214,10 @@ func TestWasmSuite(t *testing.T) {
 						}
 						args = append(args, val)
 					}
-					t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
-					t.Log(args)
+					// t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
+					// t.Log(args)
 					ret := vm.Invoke(funcID, args...)
-					t.Log("ret", ret)
+					// t.Log("ret", ret)
 
 					if len(cmd.Expected) != 0 {
 						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
@@ -230,14 +231,14 @@ func TestWasmSuite(t *testing.T) {
 						}
 
 						if ret != exp {
-							t.Errorf("Test %s: Expect return value to be %d, got %d", name, exp, ret)
+							t.Errorf("Test %s Field %s Line %d: Expect return value to be %d, got %d", name, cmd.Action.Field, cmd.Line, exp, ret)
 						}
 					}
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
 			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan":
-				t.Logf("%s not supported", cmd.Type)
+				t.Logf("Skipping %s", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)
 			}

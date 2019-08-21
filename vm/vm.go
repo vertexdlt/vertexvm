@@ -27,6 +27,8 @@ const f32SignMask = 1 << 31
 
 const wasmPageSize = 64 * 1024
 
+const maxSize = math.MaxUint32
+
 // VM virtual machine
 type VM struct {
 	Module      *wasm.Module
@@ -42,7 +44,7 @@ type VM struct {
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte) (_retVM *VM, retErr error) {
+func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -61,9 +63,10 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 		breakDepth:  -1,
 		memory:      make([]byte, wasmPageSize),
 	}
-
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
+		limits := m.Memory.Entries[0].Limits
+		log.Println("memory", line, limits.Flags, limits.Initial, limits.Maximum)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
 
@@ -298,15 +301,24 @@ func (vm *VM) interpret() uint64 {
 				binary.LittleEndian.PutUint32(curMem, uint32(v))
 			}
 		case op == opcode.MemorySize:
-			frame.readLEB(32, false)
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
 			pages := len(vm.memory) / wasmPageSize
 			vm.push(uint64(pages))
 		case op == opcode.MemoryGrow:
-			frame.readLEB(32, false)
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
 			pages := len(vm.memory) / wasmPageSize
-			requested := vm.pop()
-			vm.memory = append(vm.memory, make([]byte, requested*wasmPageSize)...)
-			vm.push(uint64(pages))
+			n := int(vm.pop())
+			limit := vm.Module.Memory.Entries[0].Limits
+			maxPages := maxSize / wasmPageSize
+			if limit.Flags == 1 && maxPages > int(limit.Maximum) {
+				maxPages = int(limit.Maximum)
+			}
+			if pages+n >= pages && pages+n <= maxPages {
+				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+			} else {
+				pages = -1
+			}
+			vm.push(uint64(uint32(pages)))
 		case op == opcode.F64ReinterpretI64:
 			vm.push(math.Float64bits(math.Float64frombits(vm.pop())))
 		// I32 Ops
@@ -778,6 +790,15 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 		frame.readLEB(32, false)
 	case op == opcode.I64Const:
 		frame.readLEB(64, false)
+	case op == opcode.F32Const:
+		frame.readUint32()
+	case op == opcode.F64Const:
+		frame.readUint64()
+	case opcode.I32Load <= op && op <= opcode.I64Store32:
+		frame.readLEB(32, false)
+		frame.readLEB(32, false)
+	case op == opcode.MemorySize || op == opcode.MemoryGrow:
+		frame.readLEB(1, false)
 	case op == opcode.CallIndirect:
 		frame.readLEB(32, false)
 		frame.readLEB(1, false)
