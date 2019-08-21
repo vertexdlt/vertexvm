@@ -191,7 +191,7 @@ func TestWasmSuite(t *testing.T) {
 				}
 			case "assert_return", "action":
 				switch cmd.Action.Type {
-				case "invoke", "conversion":
+				case "invoke":
 					funcID, ok := vm.GetFunctionIndex(cmd.Action.Field)
 					if !ok {
 						panic("function not found")
@@ -227,7 +227,7 @@ func TestWasmSuite(t *testing.T) {
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
-			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "conversion":
+			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan":
 				t.Logf("%s not supported", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)
