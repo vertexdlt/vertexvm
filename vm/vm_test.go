@@ -91,9 +91,11 @@ func TestVM(t *testing.T) {
 		{name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
 		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
 		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
+		{name: "ifelse", entry: "main", params: []uint64{1, 0}, expected: 10},
 		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
 		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
 		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
+		{name: "loop", entry: "counter", params: []uint64{}, expected: 4},
 		{name: "call_indirect", entry: "calc", params: []uint64{}, expected: 16},
 		{name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
 		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
@@ -193,18 +195,19 @@ func TestWasmSuite(t *testing.T) {
 			case "module":
 				data, err := ioutil.ReadFile(fmt.Sprintf("./test_suite/%s", cmd.Filename))
 				if err != nil {
-					panic(err)
+					t.Error(err)
 				}
 				vm, err = NewVM(data, cmd.Line)
 				if err != nil {
-					panic(err)
+					t.Error(err)
 				}
 			case "assert_return", "action":
 				switch cmd.Action.Type {
 				case "invoke":
 					funcID, ok := vm.GetFunctionIndex(cmd.Action.Field)
 					if !ok {
-						panic("function not found")
+						t.Errorf("function not found %s", cmd.Action.Field)
+						continue
 					}
 					args := make([]uint64, 0)
 					for _, arg := range cmd.Action.Args {
@@ -225,11 +228,10 @@ func TestWasmSuite(t *testing.T) {
 							panic(err)
 						}
 
-						if cmd.Expected[0].Type == "i32" {
+						if cmd.Expected[0].Type == "i32" || cmd.Expected[0].Type == "f32" {
 							ret = uint64(uint32(ret))
 							exp = uint64(uint32(exp))
 						}
-
 						if ret != exp {
 							t.Errorf("Test %s Field %s Line %d: Expect return value to be %d, got %d", name, cmd.Action.Field, cmd.Line, exp, ret)
 						}
@@ -237,7 +239,7 @@ func TestWasmSuite(t *testing.T) {
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
-			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan":
+			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "assert_exhaustion", "assert_malformed", "assert_uninstantiable":
 				t.Logf("Skipping %s", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)

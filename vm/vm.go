@@ -86,8 +86,10 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return uint64(entry.Index), ok
+	if vm.Module.Export != nil {
+		if entry, ok := vm.Module.Export.Entries[name]; ok {
+			return uint64(entry.Index), ok
+		}
 	}
 	return 0, false
 }
@@ -140,7 +142,9 @@ func (vm *VM) interpret() uint64 {
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
 			block.executeElse = false
-			if !vm.inoperative() {
+			if vm.inoperative() {
+				vm.breakDepth++
+			} else {
 				cond := vm.pop()
 				block.executeElse = (cond == 0)
 				if block.executeElse {
@@ -163,7 +167,7 @@ func (vm *VM) interpret() uint64 {
 			}
 		case op == opcode.End:
 			block := vm.popBlock()
-			if block.basePointer < vm.sp {
+			if block.basePointer < vm.sp { // block has return value
 				if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
 					retVal := castReturnValue(vm.pop(), block.returnType)
 					vm.push(retVal)
@@ -937,6 +941,7 @@ func (vm *VM) blockJump(breakDepth int) {
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
 	if jumpBlock.blockType == typeLoop {
+		vm.blocksIndex = vm.blocksIndex - breakDepth
 		vm.currentFrame().ip = jumpBlock.labelPointer
 	} else {
 		vm.breakDepth = breakDepth
