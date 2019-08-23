@@ -69,6 +69,9 @@ func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
 		log.Println("memory", line, limits.Flags, limits.Initial, limits.Maximum)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
+	if m.Start != nil {
+		vm.Invoke(uint64(m.Start.Index))
+	}
 
 	vm.initGlobals()
 	return vm, nil

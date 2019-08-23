@@ -181,16 +181,13 @@ func TestWasmSuite(t *testing.T) {
 		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
 		"skip-stack-guard-page",
 
-		// "start",
-
-		// "names", // problem with unicode. Entries key and cmd.Action.Field yield different codes
-		// "func_ptrs", // Wagon does not include import (import "spectest" "print_i32" (func (;0;) (type 6))) as func 0, shifting func index up
-		// "exports", // weird empty export
-		// "elem", "data", //parsing failed
 		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
-		// "float_exprs", "float_misc", "imports", "linking", //failed
+		// "float_exprs", "float_misc", // failed - cross-checked with emscripten
+		// "exports", // weird empty export
 		// "align", //NYI
-
+		// "elem", "data", //wagon parsing failed
+		// "names", // problem with unicode. Entries key and cmd.Action.Field yield different codes
+		// "start", "func_ptrs", "linking", "imports", // missing imports from spec
 	}
 
 	for _, name := range tests {
@@ -218,6 +215,7 @@ func TestWasmSuite(t *testing.T) {
 		}
 		var vm *VM
 		for _, cmd := range suite.Commands {
+			t.Logf("Running test %s %d", name, cmd.Line)
 			if cmd.Action.Field == "as-unary-operand" && cmd.Line == 338 {
 				continue
 			}
