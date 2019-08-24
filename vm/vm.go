@@ -123,36 +123,25 @@ func (vm *VM) interpret() uint64 {
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
-
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.Loop:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.If:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
 			block.executeElse = false
-			if vm.inoperative() {
-				vm.breakDepth++
-			} else {
-				cond := vm.pop()
-				block.executeElse = (cond == 0)
-				if block.executeElse {
-					vm.blockJump(0)
-				}
+			cond := vm.pop()
+			block.executeElse = (cond == 0)
+			if block.executeElse {
+				vm.blockJump(0)
 			}
 		case op == opcode.Else:
 			block := vm.blocks[vm.blocksIndex-1]
@@ -896,8 +885,13 @@ func (vm *VM) interpret() uint64 {
 func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	frame := vm.currentFrame()
 	switch {
-	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
+	case op == opcode.End || op == opcode.Else: // control end
 		return false
+	case op == opcode.Block || op == opcode.Loop || op == opcode.If:
+		returnType := wasm.ValueType(frame.readLEB(32, true))
+		block := NewBlock(frame.ip, getBlockType(op), returnType, vm.sp)
+		vm.pushBlock(block)
+		vm.breakDepth++
 	case op == opcode.Br || op == opcode.BrIf || op == opcode.Call:
 		fallthrough
 	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
