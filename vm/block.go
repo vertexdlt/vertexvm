@@ -30,6 +30,7 @@ func NewBlock(labelPointer int, blockType BlockType, returnType wasm.ValueType, 
 		blockType:    blockType,
 		returnType:   returnType,
 		basePointer:  basePointer,
+		executeElse:  false,
 	}
 	return b
 }

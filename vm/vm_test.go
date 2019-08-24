@@ -65,7 +65,7 @@ func getVM(name string) *VM {
 	if err != nil {
 		panic(err)
 	}
-	vm, err := NewVM(data, 0)
+	vm, err := NewVM(data)
 	if err != nil {
 		panic(err)
 	}
@@ -92,6 +92,7 @@ func TestVM(t *testing.T) {
 		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
 		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
 		{name: "ifelse", entry: "main", params: []uint64{1, 0}, expected: 10},
+		{name: "ifelse", entry: "asifthen", params: []uint64{0, 6}, expected: 6},
 		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
 		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
 		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
@@ -225,7 +226,7 @@ func TestWasmSuite(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				vm, err = NewVM(data, cmd.Line)
+				vm, err = NewVM(data)
 				if err != nil {
 					t.Error(err)
 				}

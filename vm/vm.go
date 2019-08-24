@@ -44,7 +44,7 @@ type VM struct {
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
+func NewVM(code []byte) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -65,8 +65,6 @@ func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
 	}
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
-		limits := m.Memory.Entries[0].Limits
-		log.Println("memory", line, limits.Flags, limits.Initial, limits.Maximum)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
 	if m.Start != nil {
@@ -117,7 +115,7 @@ func (vm *VM) interpret() uint64 {
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
 		// fmt.Printf("op %d 0x%x\n", op, op)
-		if vm.inoperative() && vm.skipInstructions(op) {
+		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
 		switch {
@@ -137,7 +135,6 @@ func (vm *VM) interpret() uint64 {
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
-			block.executeElse = false
 			cond := vm.pop()
 			block.executeElse = (cond == 0)
 			if block.executeElse {
@@ -148,12 +145,14 @@ func (vm *VM) interpret() uint64 {
 			if block.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			if block.executeElse {
+			if block.executeElse { // infers vm.operative() == true enterring if
 				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
-			}
-			if !vm.inoperative() {
-				if !block.executeElse {
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			} else {
+				if vm.operative() {
 					vm.blockJump(0)
 				}
 			}
@@ -168,7 +167,12 @@ func (vm *VM) interpret() uint64 {
 				vm.sp = block.basePointer
 				vm.push(ret)
 			}
-			vm.breakDepth--
+			if !vm.operative() {
+				vm.breakDepth--
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			}
 		case op == opcode.Br:
 			arg := frame.readLEB(32, false)
 			vm.blockJump(int(arg))
@@ -922,8 +926,8 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 }
 
 // inoperative vm skips instructions if there is at least 1 level of block to break out of
-func (vm *VM) inoperative() bool {
-	return vm.breakDepth > -1
+func (vm *VM) operative() bool {
+	return vm.breakDepth == -1
 }
 
 func (vm *VM) blockJump(breakDepth int) {
