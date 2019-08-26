@@ -678,10 +678,6 @@ func (vm *VM) interpret() uint64 {
 			f := float64(math.Float32frombits(uint32(vm.pop())))
 			var r float64
 			switch op {
-			case opcode.F32Abs:
-				r = math.Abs(f)
-			case opcode.F32Neg:
-				r = -f
 			case opcode.F32Ceil:
 				r = math.Ceil(f)
 			case opcode.F32Floor:
