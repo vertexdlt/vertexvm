@@ -179,12 +179,9 @@ func TestWasmSuite(t *testing.T) {
 		"left-to-right", "load", "nop", "stack", "store", "switch", "token",
 		"traps", "type", "typecheck", "unreachable", "unreached-invalid", "unwind",
 		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
-		"skip-stack-guard-page",
+		"skip-stack-guard-page", "float_exprs", "float_misc", "align", "exports",
 
-		"const",                     //some const test is off by 1. VM result is similar to that of Emscripten & WS
-		"float_exprs", "float_misc", // failed - cross-checked with emscripten
-		// "exports",      // weird empty export
-		// "align",        //NYI
+		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
 		// "elem", "data", //wagon parsing failed
 		// "names",                                    // problem with unicode. Entries key and cmd.Action.Field yield different codes
 		// "start", "func_ptrs", "linking", "imports", // missing imports from spec
@@ -250,6 +247,26 @@ func TestWasmSuite(t *testing.T) {
 					ret := vm.Invoke(funcID, args...)
 					// t.Log("ret", ret)
 
+					if len(cmd.Expected) != 0 {
+						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
+						if err != nil {
+							panic(err)
+						}
+
+						if cmd.Expected[0].Type == "i32" || cmd.Expected[0].Type == "f32" {
+							ret = uint64(uint32(ret))
+							exp = uint64(uint32(exp))
+						}
+						if ret != exp {
+							t.Errorf("Test %s Field %s Line %d: Expect return value to be %d, got %d", name, cmd.Action.Field, cmd.Line, exp, ret)
+						}
+					}
+				case "get":
+					entry, ok := vm.Module.Export.Entries[cmd.Action.Field]
+					if !ok {
+						panic("Global export not found")
+					}
+					ret := vm.globals[entry.Index]
 					if len(cmd.Expected) != 0 {
 						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
 						if err != nil {
