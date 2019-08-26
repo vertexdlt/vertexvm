@@ -181,12 +181,12 @@ func TestWasmSuite(t *testing.T) {
 		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
 		"skip-stack-guard-page",
 
-		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
-		// "float_exprs", "float_misc", // failed - cross-checked with emscripten
-		// "exports", // weird empty export
-		// "align", //NYI
+		"const",                     //some const test is off by 1. VM result is similar to that of Emscripten & WS
+		"float_exprs", "float_misc", // failed - cross-checked with emscripten
+		// "exports",      // weird empty export
+		// "align",        //NYI
 		// "elem", "data", //wagon parsing failed
-		// "names", // problem with unicode. Entries key and cmd.Action.Field yield different codes
+		// "names",                                    // problem with unicode. Entries key and cmd.Action.Field yield different codes
 		// "start", "func_ptrs", "linking", "imports", // missing imports from spec
 	}
 
