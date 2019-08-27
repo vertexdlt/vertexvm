@@ -13,11 +13,14 @@ import (
 // StackSize is the VM stack depth
 const StackSize = 1024 * 8
 
-// MaxFrames is the maxinum active frames supported
+// MaxFrames is the maximum active frames supported
 const MaxFrames = 1024
 
-// MaxBlocks is the maxinum of nested blocks supported
+// MaxBlocks is the maximum of nested blocks supported
 const MaxBlocks = 1024
+
+// MaxBrTableSize is the maximum number of br_table targets
+const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
@@ -77,18 +80,24 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 
 func (vm *VM) interpret() uint64 {
 	for {
-		if vm.currentFrame().hasEnded() {
-			vm.popFrame()
-			if vm.framesIndex == 0 {
-				if vm.sp > 0 {
-					return vm.pop()
+		for {
+			if vm.currentFrame().hasEnded() {
+				// fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
+				vm.popFrame()
+				if vm.framesIndex == 0 {
+					if vm.sp > 0 {
+						return vm.pop()
+					}
+					return 0
 				}
-				return 0
+			} else {
+				break
 			}
 		}
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
+		// fmt.Printf("op %d 0x%x\n", op, op)
 		if vm.inoperative() && vm.skipInstructions(op) {
 			continue
 		}
@@ -100,44 +109,54 @@ func (vm *VM) interpret() uint64 {
 			continue
 		case op == opcode.Block:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeBlock, returnType)
+			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.Loop:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeLoop, returnType)
+			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.If:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
-			block := NewBlock(frame.ip, typeIf, returnType)
+			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
-			cond := vm.pop()
-			block.executed = (cond != 0)
-			if !block.executed {
-				vm.blockJump(0)
+			block.executeElse = false
+			if !vm.inoperative() {
+				cond := vm.pop()
+				block.executeElse = (cond == 0)
+				if block.executeElse {
+					vm.blockJump(0)
+				}
 			}
 		case op == opcode.Else:
-			ifBlock := vm.popBlock()
-			if ifBlock.blockType != typeIf {
+			block := vm.blocks[vm.blocksIndex-1]
+			if block.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			block := NewBlock(frame.ip, typeElse, ifBlock.returnType)
-			vm.pushBlock(block)
-			if ifBlock.executed {
-				vm.blockJump(0)
-			} else {
+			if block.executeElse {
+				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
+			}
+			if !vm.inoperative() {
+				if !block.executeElse {
+					vm.blockJump(0)
+				}
 			}
 		case op == opcode.End:
 			block := vm.popBlock()
-			if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
-				retVal := castReturnValue(vm.pop(), block.returnType)
-				vm.push(retVal)
+			if block.basePointer < vm.sp {
+				if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
+					retVal := castReturnValue(vm.pop(), block.returnType)
+					vm.push(retVal)
+				}
+				ret := vm.pop()
+				vm.sp = block.basePointer
+				vm.push(ret)
 			}
 			vm.breakDepth--
 		case op == opcode.Br:
@@ -151,10 +170,41 @@ func (vm *VM) interpret() uint64 {
 				vm.blockJump(int(arg))
 			}
 			continue
+		case op == opcode.BrTable:
+			targetIndex := int(vm.pop())
+			targetCount := int(frame.readLEB(32, false))
+			targetDepth := -1
+			if targetCount > MaxBrTableSize {
+				panic("Too many br_table targets")
+			}
+			for i := 0; i < targetCount+1; i++ { // +1 for default target
+				depth := int(frame.readLEB(32, false))
+				if i == targetIndex || i == targetCount {
+					if targetDepth == -1 { // uninitialized
+						targetDepth = depth
+					}
+				}
+			}
+			vm.blockJump(targetDepth)
+			continue
 		case op == opcode.Return:
-			return vm.pop()
+			// TODO validate jump
+			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
 			fidx := frame.readLEB(32, false)
+			vm.setupFrame(int(fidx))
+			continue
+		case op == opcode.CallIndirect:
+			sigIndex := frame.readLEB(32, false)
+			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
+
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
+			eidx := vm.pop()
+			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) {
+				log.Fatal("Out of bound table access")
+			}
+			fidx := int(vm.Module.TableIndexSpace[0][eidx])
+			vm.assertFuncSig(fidx, &expectedFuncSig)
 			vm.setupFrame(int(fidx))
 			continue
 		case op == opcode.Drop:
@@ -644,6 +694,7 @@ func (vm *VM) interpret() uint64 {
 }
 
 func (vm *VM) skipInstructions(op opcode.Opcode) bool {
+	frame := vm.currentFrame()
 	switch {
 	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
 		return false
@@ -652,9 +703,17 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
 		fallthrough
 	case op == opcode.I32Const:
-		vm.currentFrame().readLEB(32, false)
+		frame.readLEB(32, false)
 	case op == opcode.I64Const:
-		vm.currentFrame().readLEB(64, false)
+		frame.readLEB(64, false)
+	case op == opcode.CallIndirect:
+		frame.readLEB(32, false)
+		frame.readLEB(1, false)
+	case op == opcode.BrTable:
+		targetCount := int(frame.readLEB(32, false))
+		for i := 0; i < targetCount+1; i++ {
+			frame.readLEB(32, false)
+		}
 	}
 	return true
 }
@@ -665,8 +724,14 @@ func (vm *VM) inoperative() bool {
 }
 
 func (vm *VM) blockJump(breakDepth int) {
+	if breakDepth < 0 {
+		panic("Invalid break depth")
+	}
 	if vm.blocksIndex-breakDepth < vm.currentFrame().baseBlockIndex {
 		panic("cannot break out of current function")
+	} else if vm.blocksIndex-breakDepth == vm.currentFrame().baseBlockIndex {
+		vm.breakDepth = breakDepth
+		return
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
 	if jumpBlock.blockType == typeLoop {
@@ -690,6 +755,7 @@ func (vm *VM) setupFrame(fidx int) {
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
 	}
+	// fmt.Println("Instructions", frame.instructions())
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -732,6 +798,7 @@ func (vm *VM) popFrame() *Frame {
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 	}
+	vm.breakDepth = -1 // return reset
 	vm.framesIndex--
 	return vm.frames[vm.framesIndex]
 }
@@ -770,4 +837,22 @@ func (vm *VM) initGlobals() error {
 		}
 	}
 	return nil
+}
+
+func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
+	signature := vm.Module.GetFunction(fidx).Sig
+	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
+		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
+		panic("Mismatch function signature")
+	}
+	for i, paramType := range signature.ParamTypes {
+		if paramType != expectedSignature.ParamTypes[i] {
+			panic("Mismatch function signature")
+		}
+	}
+	for i, returnType := range signature.ReturnTypes {
+		if returnType != expectedSignature.ReturnTypes[i] {
+			panic("Mismatch function signature")
+		}
+	}
 }
