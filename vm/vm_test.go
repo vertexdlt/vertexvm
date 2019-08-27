@@ -94,16 +94,23 @@ func TestVM(t *testing.T) {
 		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
 		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
 		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
+		{name: "call_indirect", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
+		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
+		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name)
+		fmt.Println(vm.Module.TableIndexSpace[0])
+
 		fnID, ok := vm.GetFunctionIndex(test.entry)
 		if !ok {
 			t.Error("cannot get function export")
 		}
 		ret := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
-			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
+			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
 		}
 	}
 }
@@ -153,7 +160,7 @@ func TestVM2(t *testing.T) {
 }
 
 func TestWasmSuite(t *testing.T) {
-	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "conversions"}
+	tests := []string{"i32", "i64", "f32", "f32_cmp", "f32_bitwise", "f64", "f64_cmp", "f64_bitwise", "conversions", "br", "br_if", "br_table"}
 	for _, name := range tests {
 		t.Logf("Test suite %s", name)
 		wast := fmt.Sprintf("./test_suite/%s.wast", name)
@@ -221,7 +228,7 @@ func TestWasmSuite(t *testing.T) {
 						}
 
 						if ret != exp {
-							t.Errorf("Expect return value to be %d, got %d", exp, ret)
+							t.Errorf("Test %s: Expect return value to be %d, got %d", name, exp, ret)
 						}
 					}
 				default:
