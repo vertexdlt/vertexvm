@@ -656,15 +656,21 @@ func (vm *VM) interpret() uint64 {
 				cBits = math.Float32bits(a)&^f32SignMask | math.Float32bits(b)&f32SignMask
 			}
 			vm.push(uint64(cBits))
-
-		case opcode.F32Abs <= op && op <= opcode.F32Sqrt:
+		// Upscale float64 cause loss data, use bitwise instead
+		case op == opcode.F32Neg || op == opcode.F32Abs:
+			fBits := uint32(vm.pop())
+			var rBits uint32
+			switch op {
+			case opcode.F32Abs:
+				rBits = fBits &^ f32SignMask
+			case opcode.F32Neg:
+				rBits = fBits ^ f32SignMask
+			}
+			vm.push(uint64(rBits))
+		case opcode.F32Ceil <= op && op <= opcode.F32Sqrt:
 			f := float64(math.Float32frombits(uint32(vm.pop())))
 			var r float64
 			switch op {
-			case opcode.F32Abs:
-				r = math.Abs(f)
-			case opcode.F32Neg:
-				r = -f
 			case opcode.F32Ceil:
 				r = math.Ceil(f)
 			case opcode.F32Floor:
