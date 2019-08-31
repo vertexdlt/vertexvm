@@ -29,22 +29,40 @@ const wasmPageSize = 64 * 1024
 
 const maxSize = math.MaxUint32
 
+// HostFunction defines imported functions defined in host
+type HostFunction func(args ...uint64) uint64
+
+// ImportResolver looks up the host imports
+type ImportResolver interface {
+	GetFunction(module, name string) HostFunction
+}
+
+// FunctionImport stores information about host function and the host function itself
+type FunctionImport struct {
+	module    string
+	name      string
+	signature *wasm.FunctionSig
+	function  *HostFunction
+}
+
 // VM virtual machine
 type VM struct {
-	Module      *wasm.Module
-	stack       []uint64
-	sp          int //point to the next available slot
-	frames      []*Frame
-	framesIndex int
-	globals     []uint64
-	blocks      []*Block
-	blocksIndex int
-	breakDepth  int
-	memory      []byte
+	Module          *wasm.Module
+	stack           []uint64
+	sp              int //point to the next available slot
+	frames          []*Frame
+	framesIndex     int
+	globals         []uint64
+	blocks          []*Block
+	blocksIndex     int
+	breakDepth      int
+	memory          []byte
+	functionImports []FunctionImport
+	importResolver  ImportResolver
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte) (_retVM *VM, retErr error) {
+func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -52,26 +70,57 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 	}
 
 	vm := &VM{
-		Module:      m,
-		stack:       make([]uint64, StackSize),
-		frames:      make([]*Frame, MaxFrames),
-		globals:     make([]uint64, len(m.GlobalIndexSpace)),
-		framesIndex: 0,
-		sp:          0,
-		blocks:      make([]*Block, MaxBlocks),
-		blocksIndex: 0,
-		breakDepth:  -1,
-		memory:      make([]byte, wasmPageSize),
+		Module:         m,
+		stack:          make([]uint64, StackSize),
+		frames:         make([]*Frame, MaxFrames),
+		globals:        make([]uint64, len(m.GlobalIndexSpace)),
+		framesIndex:    0,
+		sp:             0,
+		blocks:         make([]*Block, MaxBlocks),
+		blocksIndex:    0,
+		breakDepth:     -1,
+		memory:         make([]byte, wasmPageSize),
+		importResolver: importResolver,
 	}
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
-	if m.Start != nil {
-		vm.Invoke(uint64(m.Start.Index))
-	}
 
+	functionImports := make([]FunctionImport, 0)
+	if m.Import != nil {
+		for _, entry := range m.Import.Entries {
+			switch entry.Type.Kind() {
+			case wasm.ExternalFunction:
+				typeIndex := entry.Type.(wasm.FuncImport).Type
+				functionImports = append(functionImports, FunctionImport{
+					module:    entry.ModuleName,
+					name:      entry.FieldName,
+					signature: &m.Types.Entries[typeIndex],
+				})
+			default:
+				log.Println("Import not supported")
+			}
+		}
+	}
+	vm.functionImports = functionImports
 	vm.initGlobals()
+	if m.Start != nil {
+		fidx := int(m.Start.Index)
+		if fidx < len(vm.functionImports) {
+			fi := vm.functionImports[fidx]
+			hf := vm.importResolver.GetFunction(fi.module, fi.name)
+			argSize := len(fi.signature.ParamTypes)
+			args := make([]uint64, argSize)
+			for i := 0; i < argSize; i++ {
+				args[i] = vm.pop()
+			}
+			ret := hf(args...)
+			vm.push(ret)
+		} else {
+			vm.Invoke(uint64(m.Start.Index))
+		}
+	}
 	return vm, nil
 }
 
@@ -205,9 +254,21 @@ func (vm *VM) interpret() uint64 {
 			// TODO validate jump
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
-			fidx := frame.readLEB(32, false)
-			vm.setupFrame(int(fidx))
-			continue
+			fidx := int(frame.readLEB(32, false))
+			if fidx < len(vm.functionImports) {
+				fi := vm.functionImports[fidx]
+				hf := vm.importResolver.GetFunction(fi.module, fi.name)
+				argSize := len(fi.signature.ParamTypes)
+				args := make([]uint64, argSize)
+				for i := 0; i < argSize; i++ {
+					args[i] = vm.pop()
+				}
+				ret := hf(args...)
+				vm.push(ret)
+			} else {
+				vm.setupFrame(fidx)
+				continue
+			}
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
 			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
@@ -218,9 +279,21 @@ func (vm *VM) interpret() uint64 {
 				log.Fatal("Out of bound table access")
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			vm.assertFuncSig(fidx, &expectedFuncSig)
-			vm.setupFrame(int(fidx))
-			continue
+			if fidx < len(vm.functionImports) {
+				fi := vm.functionImports[fidx]
+				hf := vm.importResolver.GetFunction(fi.module, fi.name)
+				argSize := len(fi.signature.ParamTypes)
+				args := make([]uint64, argSize)
+				for i := 0; i < argSize; i++ {
+					args[i] = vm.pop()
+				}
+				ret := hf(args...)
+				vm.push(ret)
+			} else {
+				vm.assertFuncSig(fidx, &expectedFuncSig)
+				vm.setupFrame(int(fidx))
+				continue
+			}
 		case op == opcode.Drop:
 			vm.pop()
 		case op == opcode.Select:
@@ -956,7 +1029,7 @@ func (vm *VM) blockJump(breakDepth int) {
 }
 
 func (vm *VM) setupFrame(fidx int) {
-	fn := vm.Module.GetFunction(fidx)
+	fn := vm.GetFunction(fidx)
 	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
@@ -1054,7 +1127,7 @@ func (vm *VM) initGlobals() error {
 }
 
 func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
-	signature := vm.Module.GetFunction(fidx).Sig
+	signature := vm.GetFunction(fidx).Sig
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
 		panic("Mismatch function signature")
@@ -1069,4 +1142,9 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
 			panic("Mismatch function signature")
 		}
 	}
+}
+
+// GetFunction wraps module get function to take imports into account
+func (vm *VM) GetFunction(fidx int) *wasm.Function {
+	return vm.Module.GetFunction(fidx - len(vm.functionImports))
 }
