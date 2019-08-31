@@ -110,6 +110,20 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
+	case "Mf":
+		switch name {
+		case "call":
+			return func(args ...uint64) uint64 { return 2 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	case "Mt":
+		switch name {
+		case "call", "h":
+			return func(args ...uint64) uint64 { return 4 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
 	default:
 		log.Fatalf("Unknown module name: %s", module)
 	}
@@ -221,7 +235,7 @@ func TestWasmSuite(t *testing.T) {
 		// "skip-stack-guard-page", "float_exprs", "float_misc", "align", "exports",
 
 		// "start", "func_ptrs",
-		"imports",
+		"linking",
 
 		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
 		// "elem", "data", //wagon parsing failed
@@ -256,6 +270,9 @@ func TestWasmSuite(t *testing.T) {
 		for _, cmd := range suite.Commands {
 			t.Logf("Running test %s %d", name, cmd.Line)
 			if cmd.Action.Field == "as-unary-operand" && cmd.Line == 338 {
+				continue
+			}
+			if name == "linking" && cmd.Line >= 50 && cmd.Line <= 83 {
 				continue
 			}
 			switch cmd.Type {

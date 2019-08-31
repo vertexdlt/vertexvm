@@ -106,20 +106,7 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 	vm.functionImports = functionImports
 	vm.initGlobals()
 	if m.Start != nil {
-		fidx := int(m.Start.Index)
-		if fidx < len(vm.functionImports) {
-			fi := vm.functionImports[fidx]
-			hf := vm.importResolver.GetFunction(fi.module, fi.name)
-			argSize := len(fi.signature.ParamTypes)
-			args := make([]uint64, argSize)
-			for i := 0; i < argSize; i++ {
-				args[i] = vm.pop()
-			}
-			ret := hf(args...)
-			vm.push(ret)
-		} else {
-			vm.Invoke(uint64(m.Start.Index))
-		}
+		vm.Invoke(uint64(m.Start.Index))
 	}
 	return vm, nil
 }
@@ -129,8 +116,19 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	for _, arg := range args {
 		vm.push(arg)
 	}
-
-	vm.setupFrame(int(fidx))
+	index := int(fidx)
+	if index < len(vm.functionImports) {
+		fi := vm.functionImports[index]
+		hf := vm.importResolver.GetFunction(fi.module, fi.name)
+		argSize := len(fi.signature.ParamTypes)
+		args := make([]uint64, argSize)
+		for i := 0; i < argSize; i++ {
+			args[i] = vm.pop()
+		}
+		ret := hf(args...)
+		return ret
+	}
+	vm.setupFrame(index)
 	return vm.interpret()
 }
 
