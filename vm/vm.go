@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"log"
 	"math"
 	"math/bits"
@@ -24,6 +25,10 @@ const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
+const wasmPageSize = 64 * 1024
+
+const maxSize = math.MaxUint32
+
 // VM virtual machine
 type VM struct {
 	Module      *wasm.Module
@@ -35,10 +40,11 @@ type VM struct {
 	blocks      []*Block
 	blocksIndex int
 	breakDepth  int
+	memory      []byte
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte) (_retVM *VM, retErr error) {
+func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -55,7 +61,18 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 		blocks:      make([]*Block, MaxBlocks),
 		blocksIndex: 0,
 		breakDepth:  -1,
+		memory:      make([]byte, wasmPageSize),
 	}
+	if m.Memory != nil && len(m.Memory.Entries) != 0 {
+		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
+		limits := m.Memory.Entries[0].Limits
+		log.Println("memory", line, limits.Flags, limits.Initial, limits.Maximum)
+		copy(vm.memory, m.LinearMemoryIndexSpace[0])
+	}
+	if m.Start != nil {
+		vm.Invoke(uint64(m.Start.Index))
+	}
+
 	vm.initGlobals()
 	return vm, nil
 }
@@ -72,8 +89,10 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return uint64(entry.Index), ok
+	if vm.Module.Export != nil {
+		if entry, ok := vm.Module.Export.Entries[name]; ok {
+			return uint64(entry.Index), ok
+		}
 	}
 	return 0, false
 }
@@ -126,7 +145,9 @@ func (vm *VM) interpret() uint64 {
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
 			block.executeElse = false
-			if !vm.inoperative() {
+			if vm.inoperative() {
+				vm.breakDepth++
+			} else {
 				cond := vm.pop()
 				block.executeElse = (cond == 0)
 				if block.executeElse {
@@ -149,7 +170,7 @@ func (vm *VM) interpret() uint64 {
 			}
 		case op == opcode.End:
 			block := vm.popBlock()
-			if block.basePointer < vm.sp {
+			if block.basePointer < vm.sp { // block has return value
 				if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
 					retVal := castReturnValue(vm.pop(), block.returnType)
 					vm.push(retVal)
@@ -236,7 +257,77 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.SetGlobal:
 			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
-
+		case opcode.I32Load <= op && op <= opcode.I64Load32U:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			//todo inbound access check
+			switch op {
+			case opcode.I32Load, opcode.F32Load:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load, opcode.F64Load:
+				v := binary.LittleEndian.Uint64(curMem)
+				vm.push(v)
+			case opcode.I32Load8S, opcode.I64Load8S:
+				vm.push(uint64(int8(vm.memory[address])))
+			case opcode.I32Load8U, opcode.I64Load8U:
+				vm.push(uint64(vm.memory[address]))
+			case opcode.I32Load16S, opcode.I64Load16S:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(int16(v)))
+			case opcode.I32Load16U, opcode.I64Load16U:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load32S:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(int32(v)))
+			case opcode.I64Load32U:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			}
+		case opcode.I32Store <= op && op <= opcode.I64Store32:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			v := vm.pop()
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			switch op {
+			case opcode.I32Store, opcode.F32Store:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			case opcode.I64Store, opcode.F64Store:
+				binary.LittleEndian.PutUint64(curMem, v)
+			case opcode.I32Store8, opcode.I64Store8:
+				vm.memory[address] = byte(v)
+			case opcode.I32Store16, opcode.I64Store16:
+				binary.LittleEndian.PutUint16(curMem, uint16(v))
+			case opcode.I64Store32:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			}
+		case op == opcode.MemorySize:
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
+			pages := len(vm.memory) / wasmPageSize
+			vm.push(uint64(pages))
+		case op == opcode.MemoryGrow:
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
+			pages := len(vm.memory) / wasmPageSize
+			n := int(vm.pop())
+			limit := vm.Module.Memory.Entries[0].Limits
+			maxPages := maxSize / wasmPageSize
+			if limit.Flags == 1 && maxPages > int(limit.Maximum) {
+				maxPages = int(limit.Maximum)
+			}
+			if pages+n >= pages && pages+n <= maxPages {
+				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+			} else {
+				pages = -1
+			}
+			vm.push(uint64(uint32(pages)))
+		case op == opcode.F64ReinterpretI64:
+			vm.push(math.Float64bits(math.Float64frombits(vm.pop())))
 		// I32 Ops
 		case op == opcode.I32Const:
 			val := frame.readLEB(32, true)
@@ -572,15 +663,21 @@ func (vm *VM) interpret() uint64 {
 				cBits = math.Float32bits(a)&^f32SignMask | math.Float32bits(b)&f32SignMask
 			}
 			vm.push(uint64(cBits))
-
-		case opcode.F32Abs <= op && op <= opcode.F32Sqrt:
+		// Upscale float64 cause loss data, use bitwise instead
+		case op == opcode.F32Neg || op == opcode.F32Abs:
+			fBits := uint32(vm.pop())
+			var rBits uint32
+			switch op {
+			case opcode.F32Abs:
+				rBits = fBits &^ f32SignMask
+			case opcode.F32Neg:
+				rBits = fBits ^ f32SignMask
+			}
+			vm.push(uint64(rBits))
+		case opcode.F32Ceil <= op && op <= opcode.F32Sqrt:
 			f := float64(math.Float32frombits(uint32(vm.pop())))
 			var r float64
 			switch op {
-			case opcode.F32Abs:
-				r = math.Abs(f)
-			case opcode.F32Neg:
-				r = -f
 			case opcode.F32Ceil:
 				r = math.Ceil(f)
 			case opcode.F32Floor:
@@ -815,6 +912,15 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 		frame.readLEB(32, false)
 	case op == opcode.I64Const:
 		frame.readLEB(64, false)
+	case op == opcode.F32Const:
+		frame.readUint32()
+	case op == opcode.F64Const:
+		frame.readUint64()
+	case opcode.I32Load <= op && op <= opcode.I64Store32:
+		frame.readLEB(32, false)
+		frame.readLEB(32, false)
+	case op == opcode.MemorySize || op == opcode.MemoryGrow:
+		frame.readLEB(1, false)
 	case op == opcode.CallIndirect:
 		frame.readLEB(32, false)
 		frame.readLEB(1, false)
@@ -844,6 +950,7 @@ func (vm *VM) blockJump(breakDepth int) {
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
 	if jumpBlock.blockType == typeLoop {
+		vm.blocksIndex = vm.blocksIndex - breakDepth
 		vm.currentFrame().ip = jumpBlock.labelPointer
 	} else {
 		vm.breakDepth = breakDepth

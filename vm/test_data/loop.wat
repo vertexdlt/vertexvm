@@ -59,6 +59,37 @@
       return
     end
     get_local $l1)
+
+  (func $counter (export "counter") (;2;) (result i32)
+    (local i32)
+    i32.const 0
+    local.set 0
+    block (result i32)  ;; label = @1
+      loop (result i32)  ;; label = @2
+        local.get 0
+        i32.const 1
+        i32.add
+        local.set 0
+        local.get 0
+        i32.const 1
+        i32.eq
+        if  ;; label = @3
+          br 1 (;@2;)
+        end
+        local.get 0
+        i32.const 4
+        i32.eq
+        if  ;; label = @3
+          local.get 0
+          br 2 (;@1;)
+        end
+        local.get 0
+        i32.const 1
+        i32.add
+        local.set 0
+        br 0 (;@2;)
+      end
+    end)
   (table $T0 1 1 anyfunc)
   (memory $memory (export "memory") 2)
   (global $g0 (mut i32) (i32.const 66560))
