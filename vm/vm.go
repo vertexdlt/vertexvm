@@ -105,8 +105,8 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 	}
 	vm.functionImports = functionImports
 	vm.initGlobals()
-	if m.Start != nil {
-		vm.Invoke(uint64(m.Start.Index))
+	if m.Start != nil { // called after module loading
+		vm.Invoke(uint64(m.Start.Index)) // start does not take args or return
 	}
 	return vm, nil
 }
@@ -116,19 +116,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	for _, arg := range args {
 		vm.push(arg)
 	}
-	index := int(fidx)
-	if index < len(vm.functionImports) {
-		fi := vm.functionImports[index]
-		hf := vm.importResolver.GetFunction(fi.module, fi.name)
-		argSize := len(fi.signature.ParamTypes)
-		args := make([]uint64, argSize)
-		for i := 0; i < argSize; i++ {
-			args[i] = vm.pop()
-		}
-		ret := hf(args...)
-		return ret
-	}
-	vm.setupFrame(index)
+	vm.CallFunction(int(fidx))
 	return vm.interpret()
 }
 
@@ -145,15 +133,14 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 func (vm *VM) interpret() uint64 {
 	for {
 		for {
-			if vm.currentFrame().hasEnded() {
-				// fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
-				vm.popFrame()
-				if vm.framesIndex == 0 {
-					if vm.sp > 0 {
-						return vm.pop()
-					}
-					return 0
+			if vm.framesIndex == 0 {
+				if vm.sp > 0 {
+					return vm.pop()
 				}
+				return 0
+			}
+			if vm.currentFrame().hasEnded() {
+				vm.popFrame()
 			} else {
 				break
 			}
@@ -253,20 +240,7 @@ func (vm *VM) interpret() uint64 {
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
 			fidx := int(frame.readLEB(32, false))
-			if fidx < len(vm.functionImports) {
-				fi := vm.functionImports[fidx]
-				hf := vm.importResolver.GetFunction(fi.module, fi.name)
-				argSize := len(fi.signature.ParamTypes)
-				args := make([]uint64, argSize)
-				for i := 0; i < argSize; i++ {
-					args[i] = vm.pop()
-				}
-				ret := hf(args...)
-				vm.push(ret)
-			} else {
-				vm.setupFrame(fidx)
-				continue
-			}
+			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
 			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
@@ -277,20 +251,9 @@ func (vm *VM) interpret() uint64 {
 				log.Fatal("Out of bound table access")
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			if fidx < len(vm.functionImports) {
-				fi := vm.functionImports[fidx]
-				hf := vm.importResolver.GetFunction(fi.module, fi.name)
-				argSize := len(fi.signature.ParamTypes)
-				args := make([]uint64, argSize)
-				for i := 0; i < argSize; i++ {
-					args[i] = vm.pop()
-				}
-				ret := hf(args...)
-				vm.push(ret)
-			} else {
+			vm.CallFunction(fidx)
+			if fidx >= len(vm.functionImports) {
 				vm.assertFuncSig(fidx, &expectedFuncSig)
-				vm.setupFrame(int(fidx))
-				continue
 			}
 		case op == opcode.Drop:
 			vm.pop()
@@ -1145,4 +1108,21 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
 // GetFunction wraps module get function to take imports into account
 func (vm *VM) GetFunction(fidx int) *wasm.Function {
 	return vm.Module.GetFunction(fidx - len(vm.functionImports))
+}
+
+// CallFunction Either invoke an imported function or align the new frame for the incoming interpretation
+func (vm *VM) CallFunction(fidx int) {
+	if fidx < len(vm.functionImports) {
+		fi := vm.functionImports[fidx]
+		hf := vm.importResolver.GetFunction(fi.module, fi.name)
+		argSize := len(fi.signature.ParamTypes)
+		args := make([]uint64, argSize)
+		for i := 0; i < argSize; i++ {
+			args[i] = vm.pop()
+		}
+		ret := hf(args...)
+		vm.push(ret)
+	} else {
+		vm.setupFrame(fidx)
+	}
 }
