@@ -30,7 +30,7 @@ const wasmPageSize = 64 * 1024
 const maxSize = math.MaxUint32
 
 // HostFunction defines imported functions defined in host
-type HostFunction func(args ...uint64) uint64
+type HostFunction func(vm *VM, args ...uint64) uint64
 
 // ImportResolver looks up the host imports
 type ImportResolver interface {
@@ -1117,12 +1117,20 @@ func (vm *VM) CallFunction(fidx int) {
 		hf := vm.importResolver.GetFunction(fi.module, fi.name)
 		argSize := len(fi.signature.ParamTypes)
 		args := make([]uint64, argSize)
-		for i := 0; i < argSize; i++ {
+		for i := argSize - 1; i >= 0; i-- {
 			args[i] = vm.pop()
 		}
-		ret := hf(args...)
+		ret := hf(vm, args...)
 		vm.push(ret)
 	} else {
 		vm.setupFrame(fidx)
 	}
+}
+
+func (vm *VM) GetMemory() []byte {
+	return vm.memory
+}
+
+func (vm *VM) ExtendMemory(n int) {
+	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
 }

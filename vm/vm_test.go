@@ -88,7 +88,7 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "env":
 		switch name {
 		case "add":
-			return func(args ...uint64) uint64 {
+			return func(vm *VM, args ...uint64) uint64 {
 				x := int(args[0])
 				y := int(args[1])
 				return uint64(x + y)
@@ -99,28 +99,28 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "spectest":
 		switch name {
 		case "print", "print_i32", "print_i32_f32", "print_f32", "print_f64", "print_f64_f64":
-			return func(args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) uint64 { return 0 }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "test":
 		switch name {
 		case "func-i64->i64":
-			return func(args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) uint64 { return 0 }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mf":
 		switch name {
 		case "call":
-			return func(args ...uint64) uint64 { return 2 }
+			return func(vm *VM, args ...uint64) uint64 { return 2 }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mt":
 		switch name {
 		case "call", "h":
-			return func(args ...uint64) uint64 { return 4 }
+			return func(vm *VM, args ...uint64) uint64 { return 4 }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
