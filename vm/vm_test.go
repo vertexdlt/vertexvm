@@ -132,28 +132,27 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 
 func TestVM(t *testing.T) {
 	tests := []vmTest{
-		// {name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
-		// {name: "local", entry: "calc", params: []uint64{2}, expected: 3},
-		// {name: "call", entry: "calc", params: []uint64{}, expected: 16},
-		// {name: "select", entry: "calc", params: []uint64{5}, expected: 3},
-		// {name: "block", entry: "calc", params: []uint64{32}, expected: 16},
-		// {name: "block", entry: "calc", params: []uint64{30}, expected: 8},
-		// {name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
-		// {name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
-		// {name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
-		// {name: "ifelse", entry: "main", params: []uint64{1, 0}, expected: 10},
-		// {name: "ifelse", entry: "asifthen", params: []uint64{0, 6}, expected: 6},
-		// {name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
-		// {name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
-		// {name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
-		// {name: "loop", entry: "counter", params: []uint64{}, expected: 4},
-		// {name: "call_indirect", entry: "calc", params: []uint64{}, expected: 16},
-		// {name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
-		// {name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
-		// {name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
-		// {name: "return", entry: "calc", params: []uint64{}, expected: 9},
-		// {name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
-		{name: "import_env", entry: "getglobal", params: []uint64{}, expected: 0},
+		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
+		{name: "local", entry: "calc", params: []uint64{2}, expected: 3},
+		{name: "call", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "select", entry: "calc", params: []uint64{5}, expected: 3},
+		{name: "block", entry: "calc", params: []uint64{32}, expected: 16},
+		{name: "block", entry: "calc", params: []uint64{30}, expected: 8},
+		{name: "loop", entry: "calc", params: []uint64{30}, expected: 435},
+		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
+		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
+		{name: "ifelse", entry: "main", params: []uint64{1, 0}, expected: 10},
+		{name: "ifelse", entry: "asifthen", params: []uint64{0, 6}, expected: 6},
+		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
+		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
+		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
+		{name: "loop", entry: "counter", params: []uint64{}, expected: 4},
+		{name: "call_indirect", entry: "calc", params: []uint64{}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{0}, expected: 8},
+		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
+		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
+		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
+		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name)
@@ -216,31 +215,31 @@ func TestVM2(t *testing.T) {
 
 func TestWasmSuite(t *testing.T) {
 	tests := []string{
-		// "i32", "i64", "f32", "f64",
-		// "f32_cmp", "f32_bitwise", "f64_cmp", "f64_bitwise", "conversions",
-		// "br", "br_if", "br_table", "call", "call_indirect",
-		// "globals", "local_get", "local_set", "local_tee",
-		// "memory", "memory_grow", "memory_size", "memory_redundancy", "memory_trap",
-		// "binary", "binary-leb128", "block",
-		// "address",
-		// "break-drop", "comments",
-		// "return", "select", "loop", "if",
-		// "custom", "endianness",
-		// "fac", "float_literals", "float_memory",
-		// "forward", "func",
-		// "inline-module", "int_exprs", "int_literals", "labels",
-		// "left-to-right", "load", "nop", "stack", "store", "switch", "token",
-		// "traps", "type", "typecheck", "unreachable", "unreached-invalid", "unwind",
-		// "utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
-		// "skip-stack-guard-page", "float_exprs", "float_misc", "align", "exports",
+		"i32", "i64", "f32", "f64",
+		"f32_cmp", "f32_bitwise", "f64_cmp", "f64_bitwise", "conversions",
+		"br", "br_if", "br_table", "call", "call_indirect",
+		"globals", "local_get", "local_set", "local_tee",
+		"memory", "memory_grow", "memory_size", "memory_redundancy", "memory_trap",
+		"binary", "binary-leb128", "block",
+		"address",
+		"break-drop", "comments",
+		"return", "select", "loop", "if",
+		"custom", "endianness",
+		"fac", "float_literals", "float_memory",
+		"forward", "func",
+		"inline-module", "int_exprs", "int_literals", "labels",
+		"left-to-right", "load", "nop", "stack", "store", "switch", "token",
+		"traps", "type", "typecheck", "unreachable", "unreached-invalid", "unwind",
+		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
+		"skip-stack-guard-page", "float_exprs", "float_misc", "align",
+		"start", "func_ptrs",
+		"exports", // empty module removed
 
-		// "start", "func_ptrs",
-		"linking",
-
-		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
-		// "elem", "data", //wagon parsing failed
-		// "names",                                    // problem with unicode. Entries key and cmd.Action.Field yield different codes
-		// "linking", "imports", // missing imports from spec
+		// "linking",
+		// "const",	//some const test is off by 1. VM result is similar to that of Emscripten & WS
+		// "elem", "data",	//wagon parsing failed
+		// "names",	// problem with unicode. Entries key and cmd.Action.Field yield different codes
+		// "imports",	// missing imports from spec
 	}
 
 	for _, name := range tests {
