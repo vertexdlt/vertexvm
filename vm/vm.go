@@ -2,12 +2,13 @@ package vm
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"math"
 	"math/bits"
 
-	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // StackSize is the VM stack depth
@@ -40,7 +41,7 @@ type VM struct {
 // NewVM initializes a new VM
 func NewVM(code []byte) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
-	m, err := wasm.ReadModule(reader, nil)
+	m, err := wasm.ReadModule(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -72,9 +73,14 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if entry, ok := vm.Module.Export.Entries[name]; ok {
-		return uint64(entry.Index), ok
+	for i := range vm.Module.Export.Exports {
+		if vm.Module.Export.Exports[i].Name == name {
+			return uint64(vm.Module.Export.Exports[i].ExportDesc.Idx), true
+		}
 	}
+	// if entry, ok := vm.Module.Export.Exports; ok {
+	// 	return uint64(entry.Index), ok
+	// }
 	return 0, false
 }
 
@@ -101,6 +107,7 @@ func (vm *VM) interpret() uint64 {
 		if vm.inoperative() && vm.skipInstructions(op) {
 			continue
 		}
+		fmt.Printf("Op: %+v\n", op)
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
@@ -108,14 +115,14 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
 				vm.breakDepth++
 			}
 		case op == opcode.Loop:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
 			if vm.inoperative() {
@@ -196,7 +203,7 @@ func (vm *VM) interpret() uint64 {
 			continue
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
-			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
+			expectedFuncSig := wasm.FuncType(vm.Module.Types.FuncTypes[sigIndex])
 
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
@@ -852,14 +859,15 @@ func (vm *VM) blockJump(breakDepth int) {
 
 func (vm *VM) setupFrame(fidx int) {
 	fn := vm.Module.GetFunction(fidx)
-	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
+	fmt.Printf("%+v\n", fn)
+	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
 	for _, entry := range fn.Body.Locals {
 		numLocals += int(entry.Count)
 	}
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Sig.ParamTypes) + numLocals
+	vm.sp = frame.basePointer + len(fn.Type.ParamTypes) + numLocals
 	// uninitialize locals
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
@@ -897,9 +905,9 @@ func (vm *VM) pushFrame(frame *Frame) {
 }
 
 func (vm *VM) popFrame() *Frame {
-	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
+	hasReturn := len(vm.currentFrame().fn.Type.ReturnTypes) != 0
 	if hasReturn {
-		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Sig.ReturnTypes[0])
+		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Type.ReturnTypes[0])
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 		vm.push(retVal)
@@ -922,6 +930,7 @@ func (vm *VM) pushBlock(block *Block) {
 
 func (vm *VM) popBlock() *Block {
 	vm.blocksIndex--
+	fmt.Printf("BlockIndex: %+v\n", vm.blocksIndex)
 	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
 		panic("cannot find matching block opening")
 	}
@@ -930,10 +939,11 @@ func (vm *VM) popBlock() *Block {
 
 func (vm *VM) initGlobals() error {
 	for i, global := range vm.Module.GlobalIndexSpace {
-		val, err := vm.Module.ExecInitExpr(global.Init)
+		val, err := vm.Module.ExecInitExpr(global.Exprs)
 		if err != nil {
 			return err
 		}
+		fmt.Printf("%+v", val)
 		switch v := val.(type) {
 		case int32:
 			vm.globals[i] = uint64(v)
@@ -948,8 +958,8 @@ func (vm *VM) initGlobals() error {
 	return nil
 }
 
-func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
-	signature := vm.Module.GetFunction(fidx).Sig
+func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
+	signature := vm.Module.GetFunction(fidx).Type
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
 		panic("Mismatch function signature")

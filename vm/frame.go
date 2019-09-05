@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"log"
 
-	"github.com/go-interpreter/wagon/wasm"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // Frame or call frame holds the relevant execution information of a function
@@ -56,7 +56,7 @@ func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 }
 
 func (frame *Frame) instructions() []byte {
-	return frame.fn.Body.Code
+	return frame.fn.Body.Exprs
 }
 
 func (frame *Frame) hasEnded() bool {
