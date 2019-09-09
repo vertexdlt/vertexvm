@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os/exec"
 	"strconv"
 	"testing"
@@ -65,7 +66,7 @@ func getVM(name string) *VM {
 	if err != nil {
 		panic(err)
 	}
-	vm, err := NewVM(data, 0)
+	vm, err := NewVM(data, &TestResolver{})
 	if err != nil {
 		panic(err)
 	}
@@ -80,6 +81,55 @@ func TestNeg(t *testing.T) {
 	}
 }
 
+type TestResolver struct{}
+
+func (r *TestResolver) GetFunction(module, name string) HostFunction {
+	switch module {
+	case "env":
+		switch name {
+		case "add":
+			return func(vm *VM, args ...uint64) uint64 {
+				x := int(args[0])
+				y := int(args[1])
+				return uint64(x + y)
+			}
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	case "spectest":
+		switch name {
+		case "print", "print_i32", "print_i32_f32", "print_f32", "print_f64", "print_f64_f64":
+			return func(vm *VM, args ...uint64) uint64 { return 0 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	case "test":
+		switch name {
+		case "func-i64->i64":
+			return func(vm *VM, args ...uint64) uint64 { return 0 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	case "Mf":
+		switch name {
+		case "call":
+			return func(vm *VM, args ...uint64) uint64 { return 2 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	case "Mt":
+		switch name {
+		case "call", "h":
+			return func(vm *VM, args ...uint64) uint64 { return 4 }
+		default:
+			log.Fatalf("Unknown import name: %s", name)
+		}
+	default:
+		log.Fatalf("Unknown module name: %s", module)
+	}
+	return nil
+}
+
 func TestVM(t *testing.T) {
 	tests := []vmTest{
 		{name: "i32", entry: "calc", params: []uint64{}, expected: 4294967295},
@@ -92,6 +142,7 @@ func TestVM(t *testing.T) {
 		{name: "ifelse", entry: "calc", params: []uint64{1}, expected: 5},
 		{name: "ifelse", entry: "calc", params: []uint64{0}, expected: 7},
 		{name: "ifelse", entry: "main", params: []uint64{1, 0}, expected: 10},
+		{name: "ifelse", entry: "asifthen", params: []uint64{0, 6}, expected: 6},
 		{name: "loop", entry: "isPrime", params: []uint64{6}, expected: 2},
 		{name: "loop", entry: "isPrime", params: []uint64{9}, expected: 3},
 		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
@@ -101,6 +152,7 @@ func TestVM(t *testing.T) {
 		{name: "br_table", entry: "calc", params: []uint64{1}, expected: 16},
 		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
 		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
+		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name)
@@ -179,12 +231,15 @@ func TestWasmSuite(t *testing.T) {
 		"left-to-right", "load", "nop", "stack", "store", "switch", "token",
 		"traps", "type", "typecheck", "unreachable", "unreached-invalid", "unwind",
 		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
-		"skip-stack-guard-page", "float_exprs", "float_misc", "align", "exports",
+		"skip-stack-guard-page", "float_exprs", "float_misc", "align",
+		"start", "func_ptrs",
+		"exports", // empty module removed
 
-		// "const", //some const test is off by 1. VM result is similar to that of Emscripten & WS
-		// "elem", "data", //wagon parsing failed
-		// "names",                                    // problem with unicode. Entries key and cmd.Action.Field yield different codes
-		// "start", "func_ptrs", "linking", "imports", // missing imports from spec
+		// "linking",
+		// "const",	//some const test is off by 1. VM result is similar to that of Emscripten & WS
+		// "elem", "data",	//wagon parsing failed
+		// "names",	// problem with unicode. Entries key and cmd.Action.Field yield different codes
+		// "imports",	// missing imports from spec
 	}
 
 	for _, name := range tests {
@@ -216,13 +271,16 @@ func TestWasmSuite(t *testing.T) {
 			if cmd.Action.Field == "as-unary-operand" && cmd.Line == 338 {
 				continue
 			}
+			if name == "linking" && cmd.Line >= 50 && cmd.Line <= 83 {
+				continue
+			}
 			switch cmd.Type {
 			case "module":
 				data, err := ioutil.ReadFile(fmt.Sprintf("./test_suite/%s", cmd.Filename))
 				if err != nil {
 					t.Error(err)
 				}
-				vm, err = NewVM(data, cmd.Line)
+				vm, err = NewVM(data, &TestResolver{})
 				if err != nil {
 					t.Error(err)
 				}
@@ -284,7 +342,7 @@ func TestWasmSuite(t *testing.T) {
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
-			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "assert_exhaustion", "assert_malformed", "assert_uninstantiable":
+			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "assert_exhaustion", "assert_malformed", "assert_uninstantiable", "assert_unlinkable":
 				t.Logf("Skipping %s", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)

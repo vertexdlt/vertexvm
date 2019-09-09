@@ -29,22 +29,40 @@ const wasmPageSize = 64 * 1024
 
 const maxSize = math.MaxUint32
 
+// HostFunction defines imported functions defined in host
+type HostFunction func(vm *VM, args ...uint64) uint64
+
+// ImportResolver looks up the host imports
+type ImportResolver interface {
+	GetFunction(module, name string) HostFunction
+}
+
+// FunctionImport stores information about host function and the host function itself
+type FunctionImport struct {
+	module    string
+	name      string
+	signature *wasm.FunctionSig
+	function  *HostFunction
+}
+
 // VM virtual machine
 type VM struct {
-	Module      *wasm.Module
-	stack       []uint64
-	sp          int //point to the next available slot
-	frames      []*Frame
-	framesIndex int
-	globals     []uint64
-	blocks      []*Block
-	blocksIndex int
-	breakDepth  int
-	memory      []byte
+	Module          *wasm.Module
+	stack           []uint64
+	sp              int //point to the next available slot
+	frames          []*Frame
+	framesIndex     int
+	globals         []uint64
+	blocks          []*Block
+	blocksIndex     int
+	breakDepth      int
+	memory          []byte
+	functionImports []FunctionImport
+	importResolver  ImportResolver
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
+func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -52,28 +70,44 @@ func NewVM(code []byte, line int) (_retVM *VM, retErr error) {
 	}
 
 	vm := &VM{
-		Module:      m,
-		stack:       make([]uint64, StackSize),
-		frames:      make([]*Frame, MaxFrames),
-		globals:     make([]uint64, len(m.GlobalIndexSpace)),
-		framesIndex: 0,
-		sp:          0,
-		blocks:      make([]*Block, MaxBlocks),
-		blocksIndex: 0,
-		breakDepth:  -1,
-		memory:      make([]byte, wasmPageSize),
+		Module:         m,
+		stack:          make([]uint64, StackSize),
+		frames:         make([]*Frame, MaxFrames),
+		globals:        make([]uint64, len(m.GlobalIndexSpace)),
+		framesIndex:    0,
+		sp:             0,
+		blocks:         make([]*Block, MaxBlocks),
+		blocksIndex:    0,
+		breakDepth:     -1,
+		memory:         make([]byte, wasmPageSize),
+		importResolver: importResolver,
 	}
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
-		limits := m.Memory.Entries[0].Limits
-		log.Println("memory", line, limits.Flags, limits.Initial, limits.Maximum)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
-	if m.Start != nil {
-		vm.Invoke(uint64(m.Start.Index))
-	}
 
+	functionImports := make([]FunctionImport, 0)
+	if m.Import != nil {
+		for _, entry := range m.Import.Entries {
+			switch entry.Type.Kind() {
+			case wasm.ExternalFunction:
+				typeIndex := entry.Type.(wasm.FuncImport).Type
+				functionImports = append(functionImports, FunctionImport{
+					module:    entry.ModuleName,
+					name:      entry.FieldName,
+					signature: &m.Types.Entries[typeIndex],
+				})
+			default:
+				log.Println("Import not supported")
+			}
+		}
+	}
+	vm.functionImports = functionImports
 	vm.initGlobals()
+	if m.Start != nil { // called after module loading
+		vm.Invoke(uint64(m.Start.Index)) // start does not take args or return
+	}
 	return vm, nil
 }
 
@@ -82,8 +116,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	for _, arg := range args {
 		vm.push(arg)
 	}
-
-	vm.setupFrame(int(fidx))
+	vm.CallFunction(int(fidx))
 	return vm.interpret()
 }
 
@@ -100,15 +133,14 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 func (vm *VM) interpret() uint64 {
 	for {
 		for {
-			if vm.currentFrame().hasEnded() {
-				// fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
-				vm.popFrame()
-				if vm.framesIndex == 0 {
-					if vm.sp > 0 {
-						return vm.pop()
-					}
-					return 0
+			if vm.framesIndex == 0 {
+				if vm.sp > 0 {
+					return vm.pop()
 				}
+				return 0
+			}
+			if vm.currentFrame().hasEnded() {
+				vm.popFrame()
 			} else {
 				break
 			}
@@ -117,54 +149,44 @@ func (vm *VM) interpret() uint64 {
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
 		// fmt.Printf("op %d 0x%x\n", op, op)
-		if vm.inoperative() && vm.skipInstructions(op) {
+		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
-
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.Loop:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.If:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
-			block.executeElse = false
-			if vm.inoperative() {
-				vm.breakDepth++
-			} else {
-				cond := vm.pop()
-				block.executeElse = (cond == 0)
-				if block.executeElse {
-					vm.blockJump(0)
-				}
+			cond := vm.pop()
+			block.executeElse = (cond == 0)
+			if block.executeElse {
+				vm.blockJump(0)
 			}
 		case op == opcode.Else:
 			block := vm.blocks[vm.blocksIndex-1]
 			if block.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			if block.executeElse {
+			if block.executeElse { // infers vm.operative() == true enterring if
 				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
-			}
-			if !vm.inoperative() {
-				if !block.executeElse {
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			} else {
+				if vm.operative() {
 					vm.blockJump(0)
 				}
 			}
@@ -179,7 +201,12 @@ func (vm *VM) interpret() uint64 {
 				vm.sp = block.basePointer
 				vm.push(ret)
 			}
-			vm.breakDepth--
+			if !vm.operative() {
+				vm.breakDepth--
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			}
 		case op == opcode.Br:
 			arg := frame.readLEB(32, false)
 			vm.blockJump(int(arg))
@@ -212,9 +239,8 @@ func (vm *VM) interpret() uint64 {
 			// TODO validate jump
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
-			fidx := frame.readLEB(32, false)
-			vm.setupFrame(int(fidx))
-			continue
+			fidx := int(frame.readLEB(32, false))
+			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
 			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
@@ -225,9 +251,10 @@ func (vm *VM) interpret() uint64 {
 				log.Fatal("Out of bound table access")
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			vm.assertFuncSig(fidx, &expectedFuncSig)
-			vm.setupFrame(int(fidx))
-			continue
+			vm.CallFunction(fidx)
+			if fidx >= len(vm.functionImports) {
+				vm.assertFuncSig(fidx, &expectedFuncSig)
+			}
 		case op == opcode.Drop:
 			vm.pop()
 		case op == opcode.Select:
@@ -902,8 +929,13 @@ func (vm *VM) interpret() uint64 {
 func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	frame := vm.currentFrame()
 	switch {
-	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
+	case op == opcode.End || op == opcode.Else: // control end
 		return false
+	case op == opcode.Block || op == opcode.Loop || op == opcode.If:
+		returnType := wasm.ValueType(frame.readLEB(32, true))
+		block := NewBlock(frame.ip, getBlockType(op), returnType, vm.sp)
+		vm.pushBlock(block)
+		vm.breakDepth++
 	case op == opcode.Br || op == opcode.BrIf || op == opcode.Call:
 		fallthrough
 	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
@@ -934,8 +966,8 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 }
 
 // inoperative vm skips instructions if there is at least 1 level of block to break out of
-func (vm *VM) inoperative() bool {
-	return vm.breakDepth > -1
+func (vm *VM) operative() bool {
+	return vm.breakDepth == -1
 }
 
 func (vm *VM) blockJump(breakDepth int) {
@@ -958,7 +990,7 @@ func (vm *VM) blockJump(breakDepth int) {
 }
 
 func (vm *VM) setupFrame(fidx int) {
-	fn := vm.Module.GetFunction(fidx)
+	fn := vm.GetFunction(fidx)
 	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
@@ -1056,7 +1088,7 @@ func (vm *VM) initGlobals() error {
 }
 
 func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
-	signature := vm.Module.GetFunction(fidx).Sig
+	signature := vm.GetFunction(fidx).Sig
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
 		panic("Mismatch function signature")
@@ -1071,4 +1103,34 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
 			panic("Mismatch function signature")
 		}
 	}
+}
+
+// GetFunction wraps module get function to take imports into account
+func (vm *VM) GetFunction(fidx int) *wasm.Function {
+	return vm.Module.GetFunction(fidx - len(vm.functionImports))
+}
+
+// CallFunction Either invoke an imported function or align the new frame for the incoming interpretation
+func (vm *VM) CallFunction(fidx int) {
+	if fidx < len(vm.functionImports) {
+		fi := vm.functionImports[fidx]
+		hf := vm.importResolver.GetFunction(fi.module, fi.name)
+		argSize := len(fi.signature.ParamTypes)
+		args := make([]uint64, argSize)
+		for i := argSize - 1; i >= 0; i-- {
+			args[i] = vm.pop()
+		}
+		ret := hf(vm, args...)
+		vm.push(ret)
+	} else {
+		vm.setupFrame(fidx)
+	}
+}
+
+func (vm *VM) GetMemory() []byte {
+	return vm.memory
+}
+
+func (vm *VM) ExtendMemory(n int) {
+	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
 }

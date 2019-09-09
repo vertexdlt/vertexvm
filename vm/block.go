@@ -1,6 +1,9 @@
 package vm
 
-import "github.com/go-interpreter/wagon/wasm"
+import (
+	"github.com/go-interpreter/wagon/wasm"
+	"github.com/vertexdlt/vertexvm/opcode"
+)
 
 // BlockType type of a wasm block
 type BlockType int
@@ -27,6 +30,20 @@ func NewBlock(labelPointer int, blockType BlockType, returnType wasm.ValueType, 
 		blockType:    blockType,
 		returnType:   returnType,
 		basePointer:  basePointer,
+		executeElse:  false,
 	}
 	return b
+}
+
+func getBlockType(op opcode.Opcode) BlockType {
+	switch op {
+	case opcode.Block:
+		return typeBlock
+	case opcode.Loop:
+		return typeLoop
+	case opcode.If:
+		return typeIf
+	default:
+		panic("invalid opcode")
+	}
 }
