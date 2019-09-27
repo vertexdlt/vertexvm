@@ -45,22 +45,6 @@ type ValueType int8
 // Mut represent mutability
 type Mut uint8
 
-// // TypeIdx represent the index space for Function Type
-// // https://webassembly.github.io/spec/core/binary/modules.html#binary-funcidx
-// type TypeIdx uint32
-
-// // FuncIdx represent the index space for Functions
-// type FuncIdx uint32
-
-// // TableIdx represent the index space for Tables
-// type TableIdx uint32
-
-// // MemIdx represent the index space for Memories
-// type MemIdx uint32
-
-// // GlobalIdx represent the index space for Globals
-// type GlobalIdx uint32
-
 // Import represent the Import component
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-import
 type Import struct {
