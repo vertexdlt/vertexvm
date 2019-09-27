@@ -2,9 +2,12 @@ package wasm
 
 import (
 	"bytes"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"log"
 	"unicode/utf8"
 
 	"github.com/vertexdlt/vertexvm/leb128"
@@ -42,10 +45,21 @@ type ValueType int8
 // Mut represent mutability
 type Mut uint8
 
-type ExportDesc struct {
-	Kind byte
-	Idx  uint32
-}
+// // TypeIdx represent the index space for Function Type
+// // https://webassembly.github.io/spec/core/binary/modules.html#binary-funcidx
+// type TypeIdx uint32
+
+// // FuncIdx represent the index space for Functions
+// type FuncIdx uint32
+
+// // TableIdx represent the index space for Tables
+// type TableIdx uint32
+
+// // MemIdx represent the index space for Memories
+// type MemIdx uint32
+
+// // GlobalIdx represent the index space for Globals
+// type GlobalIdx uint32
 
 // Import represent the Import component
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-import
@@ -58,11 +72,11 @@ type Import struct {
 // ImportDesc represent the Import Description
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-importdesc
 type ImportDesc struct {
-	Kind    byte
-	TypeIdx uint32
-	Table   *Table
-	Mem     *Mem
-	Global  *Global
+	Kind       byte
+	TypeIdx    uint32
+	Table      *Table
+	Mem        *Mem
+	GlobalType *GlobalType
 }
 
 const (
@@ -114,23 +128,29 @@ type GlobalType struct {
 // Global represent the Global component
 // according to https://webassembly.github.io/spec/core/binary/modules.html#global-section
 type Global struct {
-	GlobalType GlobalType
-	Exprs      []byte
+	Type GlobalType
+	Init []byte
+}
+
+// ExportDesc represent Export Description https://webassembly.github.io/spec/core/binary/modules.html#binary-exportdesc
+type ExportDesc struct {
+	Kind byte
+	Idx  uint32 // Idx can be FuncIdx | TableIdx | MemIdx | GlobalIdx
 }
 
 // Export represent the Export component
 // according to https://webassembly.github.io/spec/core/binary/modules.html#export-section
 type Export struct {
-	Name       string
-	ExportDesc ExportDesc
+	Name string
+	Desc ExportDesc
 }
 
 // Element represent the Element component
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-elem
 type Element struct {
-	TableIdx  uint32
-	Exprs     []byte
-	FuncIdxes []uint32
+	TableIdx uint32
+	Init     []byte
+	Offset   []uint32 // Offset is an array of FuncIdx
 }
 
 // Code represent the code entry of the Code section
@@ -140,18 +160,25 @@ type Code struct {
 	Func Func
 }
 
+// Data represent the data entry of the Data section
+type Data struct {
+	MemIdx uint32
+	Offset []byte
+	Init   []byte
+}
+
+// LocalEntry represent the count Locals of the same value type
+// https://webassembly.github.io/spec/core/binary/modules.html#binary-local
+type LocalEntry struct {
+	Count     uint32
+	ValueType ValueType
+}
+
 // Func represent the function code which consists of locals & function's body
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-func
 type Func struct {
-	Locals []Locals
+	Locals []LocalEntry
 	Exprs  []byte
-}
-
-// Locals represent the count locals of the same value type
-// https://webassembly.github.io/spec/core/binary/modules.html#binary-local
-type Locals struct {
-	Count     uint32
-	ValueType ValueType
 }
 
 // TypeSec represent the Type Section
@@ -169,7 +196,7 @@ type ImportSec struct {
 // FuncSec represent the Function Section
 // https://webassembly.github.io/spec/core/binary/modules.html#function-section
 type FuncSec struct {
-	TypeIdxes []uint32
+	TypeIndexes []uint32
 }
 
 // TableSec represent the Table Section
@@ -193,13 +220,13 @@ type GlobalSec struct {
 // ExportSec represent the Export Section
 // https://webassembly.github.io/spec/core/binary/modules.html#export-section
 type ExportSec struct {
-	Exports []Export
+	Entries map[string]Export
 }
 
 // StartSec represent the Start Section
 // https://webassembly.github.io/spec/core/binary/modules.html#start-section
 type StartSec struct {
-	Index uint32
+	FuncIdx uint32
 }
 
 // ElementSec represent the Element Section
@@ -212,6 +239,11 @@ type ElementSec struct {
 // https://webassembly.github.io/spec/core/binary/modules.html#code-section
 type CodeSec struct {
 	Codes []Code
+}
+
+// DataSec represent the Data Section
+type DataSec struct {
+	DataEntries []Data
 }
 
 // ReadModule read a module from Reader r and return a constructed Module
@@ -227,8 +259,9 @@ func ReadModule(r io.Reader) (*Module, error) {
 		return nil, err
 	}
 
+	var lastID *byte
 	for {
-		err := readSection(m, r)
+		lastID, err = readSection(m, r, lastID)
 
 		if err != nil {
 			if err != io.EOF {
@@ -262,7 +295,7 @@ func readMagic(r io.Reader) error {
 		return err
 	}
 	if magic != Magic {
-		return errors.New("wasm: Invalid magic number")
+		return errors.New("wasm: invalid magic number")
 	}
 
 	return nil
@@ -274,79 +307,100 @@ func readVersion(r io.Reader) (uint32, error) {
 		return 0, err
 	}
 	if version != Version {
-		return 0, errors.New("wasm: Invalid version number")
+		return 0, errors.New("wasm: invalid version number")
 	}
 
 	return version, nil
 }
 
-func readSection(m *Module, r io.Reader) error {
+func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 	id, err := ReadByte(r)
 	if err != nil {
-		return err
+		return nil, err
+	}
+	if lastID != nil && *lastID != 0 {
+		if *lastID >= id {
+			return nil, fmt.Errorf("wasm: sections must occur at most once and in the prescribed order")
+		}
 	}
 
 	datalen, err := leb128.ReadUint32(r)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
+	// var buffer bytes.Buffer
 	sectionReader := io.LimitReader(r, int64(datalen))
+	buffer, _ := ioutil.ReadAll(sectionReader)
+	sectionReader = bytes.NewBuffer(buffer)
+	// sectionReader.Read(a)
+	fmt.Println(id)
+	fmt.Printf("%s", hex.Dump(buffer))
+
 	switch id {
+	case 0:
+		// Skip custom section
+		io.CopyN(ioutil.Discard, sectionReader, int64(datalen))
+		log.Println("Custom Section not supported, skipped")
 	case 1:
 		err := readSectionType(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 2:
 		err := readSectionImport(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 3:
 		err := readSectionFunction(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 4:
 		err := readSectionTable(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 5:
 		err := readSectionMemory(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 6:
 		err := readSectionGlobal(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 7:
 		err := readSectionExport(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 8:
 		err := readSectionStart(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 9:
 		err := readSectionElement(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
 		}
 	case 10:
 		err := readSectionCode(m, sectionReader)
 		if err != nil {
-			return err
+			return nil, err
+		}
+	case 11:
+		err := readSectionData(m, sectionReader)
+		if err != nil {
+			return nil, err
 		}
 	default:
-		return errors.New("Unknown section id")
+		return nil, fmt.Errorf("wasm: read section error - unknown section id %d", id)
 	}
-	return nil
+	return &id, err
 }
 
 func readSectionType(m *Module, r io.Reader) error {
@@ -354,6 +408,7 @@ func readSectionType(m *Module, r io.Reader) error {
 	if err != nil {
 		return err
 	}
+
 	m.Types = &TypeSec{}
 	m.Types.FuncTypes = make([]FuncType, vectorLen)
 	for i := uint32(0); i < vectorLen; i++ {
@@ -370,28 +425,26 @@ func readSectionType(m *Module, r io.Reader) error {
 			return err
 		}
 
-		paramTypes := make([]ValueType, paramTypesCount)
+		m.Types.FuncTypes[i].ParamTypes = make([]ValueType, paramTypesCount)
 		for j := uint32(0); j < paramTypesCount; j++ {
-			paramTypes[j], err = readValueType(r)
+			m.Types.FuncTypes[i].ParamTypes[j], err = readValueType(r)
 			if err != nil {
 				return err
 			}
 		}
-		m.Types.FuncTypes[i].ParamTypes = paramTypes
 
 		returnTypesCount, err := leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
 
-		returnTypes := make([]ValueType, returnTypesCount)
+		m.Types.FuncTypes[i].ReturnTypes = make([]ValueType, returnTypesCount)
 		for j := uint32(0); j < returnTypesCount; j++ {
-			returnTypes[j], err = readValueType(r)
+			m.Types.FuncTypes[i].ReturnTypes[j], err = readValueType(r)
 			if err != nil {
 				return err
 			}
 		}
-		m.Types.FuncTypes[i].ReturnTypes = returnTypes
 	}
 
 	return nil
@@ -429,6 +482,7 @@ func readSectionImport(m *Module, r io.Reader) error {
 				return err
 			}
 		case ExternalTable:
+			importDesc.Table = &Table{}
 			importDesc.Table.ElemType, err = readElemType(r)
 			if err != nil {
 				return err
@@ -439,19 +493,17 @@ func readSectionImport(m *Module, r io.Reader) error {
 				return err
 			}
 		case ExternalMemory:
+			importDesc.Mem = &Mem{}
 			importDesc.Mem.Limits, err = readLimits(r)
 			if err != nil {
 				return err
 			}
 		case ExternalGlobalType:
-			importDesc.Global.GlobalType, err = readGlobalType(r)
+			globalType, err := readGlobalType(r)
 			if err != nil {
 				return err
 			}
-			importDesc.Global.Exprs, err = readExprs(r)
-			if err != nil {
-				return err
-			}
+			importDesc.GlobalType = &globalType
 		default:
 			return fmt.Errorf("wasm: invalid external kind %v", kind)
 		}
@@ -469,9 +521,9 @@ func readSectionFunction(m *Module, r io.Reader) error {
 	}
 
 	m.Function = &FuncSec{}
-	m.Function.TypeIdxes = make([]uint32, typeIdxCount)
+	m.Function.TypeIndexes = make([]uint32, typeIdxCount)
 	for i := uint32(0); i < typeIdxCount; i++ {
-		m.Function.TypeIdxes[i], err = leb128.ReadUint32(r)
+		m.Function.TypeIndexes[i], err = leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
@@ -529,12 +581,12 @@ func readSectionGlobal(m *Module, r io.Reader) error {
 	m.Global = &GlobalSec{}
 	m.Global.Globals = make([]Global, globalCount)
 	for i := uint32(0); i < globalCount; i++ {
-		m.Global.Globals[i].GlobalType, err = readGlobalType(r)
+		m.Global.Globals[i].Type, err = readGlobalType(r)
 		if err != nil {
 			return err
 		}
 
-		m.Global.Globals[i].Exprs, err = readExprs(r)
+		m.Global.Globals[i].Init, err = readExprs(r)
 		if err != nil {
 			return err
 		}
@@ -550,9 +602,10 @@ func readSectionExport(m *Module, r io.Reader) error {
 	}
 
 	m.Export = &ExportSec{}
-	m.Export.Exports = make([]Export, exportCount)
+	m.Export.Entries = make(map[string]Export, exportCount)
 	for i := uint32(0); i < exportCount; i++ {
-		m.Export.Exports[i].Name, err = readName(r)
+		var export Export
+		export.Name, err = readName(r)
 		if err != nil {
 			return err
 		}
@@ -562,13 +615,16 @@ func readSectionExport(m *Module, r io.Reader) error {
 			return err
 		}
 		if b != 0x00 && b != 0x01 && b != 0x02 && b != 0x03 {
-			return errors.New("Invalid export description flag")
+			return errors.New("wasm: invalid export desc flag")
 		}
-		m.Export.Exports[i].ExportDesc.Kind = b
-		m.Export.Exports[i].ExportDesc.Idx, err = leb128.ReadUint32(r)
+
+		export.Desc.Kind = b
+		export.Desc.Idx, err = leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
+
+		m.Export.Entries[export.Name] = export
 	}
 
 	return nil
@@ -577,7 +633,7 @@ func readSectionExport(m *Module, r io.Reader) error {
 func readSectionStart(m *Module, r io.Reader) error {
 	var err error
 	m.Start = &StartSec{}
-	m.Start.Index, err = leb128.ReadUint32(r)
+	m.Start.FuncIdx, err = leb128.ReadUint32(r)
 	return err
 }
 
@@ -595,7 +651,7 @@ func readSectionElement(m *Module, r io.Reader) error {
 			return err
 		}
 
-		m.Element.Elements[i].Exprs, err = readExprs(r)
+		m.Element.Elements[i].Init, err = readExprs(r)
 		if err != nil {
 			return err
 		}
@@ -612,7 +668,7 @@ func readSectionElement(m *Module, r io.Reader) error {
 				return err
 			}
 		}
-		m.Element.Elements[i].FuncIdxes = funcIdxes
+		m.Element.Elements[i].Offset = funcIdxes
 	}
 
 	return nil
@@ -651,6 +707,37 @@ func readSectionCode(m *Module, r io.Reader) error {
 	return nil
 }
 
+func readSectionData(m *Module, r io.Reader) error {
+	dataCount, err := leb128.ReadUint32(r)
+	if err != nil {
+		return err
+	}
+
+	m.Data = &DataSec{}
+	m.Data.DataEntries = make([]Data, dataCount)
+	for i := uint32(0); i < dataCount; i++ {
+		m.Data.DataEntries[i].MemIdx, err = leb128.ReadUint32(r)
+		if err != nil {
+			return err
+		}
+
+		m.Data.DataEntries[i].Offset, err = readExprs(r)
+		if err != nil {
+			return err
+		}
+
+		byteCount, err := leb128.ReadUint32(r)
+		if err != nil {
+			return err
+		}
+
+		m.Data.DataEntries[i].Init, err = ReadBytes(r, byteCount)
+	}
+
+	fmt.Println(m.Data)
+	return nil
+}
+
 func readElemType(r io.Reader) (byte, error) {
 	var elemType byte
 	elemType, err := ReadByte(r)
@@ -661,7 +748,7 @@ func readElemType(r io.Reader) (byte, error) {
 	// Version 1 of WebAssembly only support funcref
 	// https://webassembly.github.io/spec/core/syntax/types.html#syntax-elemtype
 	if elemType != ElemTypeFuncRef {
-		return elemType, errors.New("Invalid table element type")
+		return elemType, errors.New("wasm: invalid table element type")
 	}
 
 	return elemType, nil
@@ -693,7 +780,7 @@ func readLimits(r io.Reader) (Limits, error) {
 			return limits, err
 		}
 	default:
-		return limits, errors.New("Invalid limits flag")
+		return limits, errors.New("wasm: invalid limits flag")
 	}
 
 	return limits, nil
@@ -725,8 +812,9 @@ func readMut(r io.Reader) (Mut, error) {
 		return res, err
 	}
 	if b != 0x00 && b != 0x01 {
-		return res, errors.New("Invalid Mutability flag")
+		return res, errors.New("wasm: invalid mutability flag")
 	}
+
 	res = Mut(b)
 	return res, nil
 }
@@ -738,7 +826,7 @@ func readValueType(r io.Reader) (ValueType, error) {
 		return res, err
 	}
 	if b != 0x7F && b != 0x7E && b != 0x7D && b != 0x7C {
-		return res, errors.New("Invalid Value Type")
+		return res, errors.New("wasm: invalid value type")
 	}
 	res = ValueType(b)
 	return res, nil
@@ -760,13 +848,13 @@ func readName(r io.Reader) (string, error) {
 	return string(bytes), nil
 }
 
-func readLocals(r io.Reader) ([]Locals, error) {
+func readLocals(r io.Reader) ([]LocalEntry, error) {
 	localCount, err := leb128.ReadUint32(r)
 	if err != nil {
-		return []Locals{}, err
+		return []LocalEntry{}, err
 	}
 
-	locals := make([]Locals, localCount)
+	locals := make([]LocalEntry, localCount)
 	for i := uint32(0); i < localCount; i++ {
 		locals[i].Count, err = leb128.ReadUint32(r)
 		if err != nil {

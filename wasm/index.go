@@ -40,6 +40,7 @@ type Module struct {
 	Start    *StartSec
 	Element  *ElementSec
 	Code     *CodeSec
+	Data     *DataSec
 
 	FunctionIndexSpace []Function
 	GlobalIndexSpace   []Global
@@ -102,7 +103,7 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 			if globalVar == nil {
 				return nil, errors.New("InvalidGlobalIndexError")
 			}
-			lastVal = globalVar.GlobalType.ValueType
+			lastVal = globalVar.Type.ValueType
 		case end:
 			break
 		default:
@@ -136,7 +137,7 @@ func (m *Module) populateFunctions() error {
 		return nil
 	}
 
-	for codeIndex, typeIndex := range m.Function.TypeIdxes {
+	for codeIndex, typeIndex := range m.Function.TypeIndexes {
 		if int(typeIndex) >= len(m.Types.FuncTypes) {
 			return errors.New("Invalid function index")
 		}
@@ -151,9 +152,9 @@ func (m *Module) populateFunctions() error {
 		m.FunctionIndexSpace = append(m.FunctionIndexSpace, fn)
 	}
 
-	funcs := make([]uint32, 0, len(m.Function.TypeIdxes))
-	funcs = append(funcs, m.Function.TypeIdxes...)
-	m.Function.TypeIdxes = funcs
+	funcs := make([]uint32, 0, len(m.Function.TypeIndexes))
+	funcs = append(funcs, m.Function.TypeIndexes...)
+	m.Function.TypeIndexes = funcs
 	return nil
 }
 
@@ -194,7 +195,7 @@ func (m *Module) populateTables() error {
 			return errors.New("Invalid Table Index")
 		}
 
-		val, err := m.ExecInitExpr(elem.Exprs)
+		val, err := m.ExecInitExpr(elem.Init)
 		if err != nil {
 			return err
 		}
@@ -206,13 +207,13 @@ func (m *Module) populateTables() error {
 
 		table := m.TableIndexSpace[elem.TableIdx]
 		//use uint64 to avoid overflow
-		if uint64(offset)+uint64(len(elem.FuncIdxes)) > uint64(len(table)) {
-			data := make([]uint32, uint64(offset)+uint64(len(elem.FuncIdxes)))
-			copy(data[offset:], elem.FuncIdxes)
+		if uint64(offset)+uint64(len(elem.Offset)) > uint64(len(table)) {
+			data := make([]uint32, uint64(offset)+uint64(len(elem.Offset)))
+			copy(data[offset:], elem.Offset)
 			copy(data, table)
 			m.TableIndexSpace[elem.TableIdx] = data
 		} else {
-			copy(table[offset:], elem.FuncIdxes)
+			copy(table[offset:], elem.Offset)
 		}
 	}
 
@@ -228,6 +229,37 @@ func (m *Module) GetTableElement(index int) (uint32, error) {
 }
 
 func (m *Module) populateLinearMemory() error {
+	if m.Data == nil || len(m.Data.DataEntries) == 0 {
+		return nil
+	}
+	// each module can only have a single linear memory in the MVP
+
+	for _, entry := range m.Data.DataEntries {
+		if entry.MemIdx != 0 {
+			return errors.New("Invalid Linear Memory Index Error")
+		}
+
+		val, err := m.ExecInitExpr(entry.Offset)
+		if err != nil {
+			return err
+		}
+		off, ok := val.(int32)
+		if !ok {
+			return errors.New("InvalidValueTypeInitExprError")
+		}
+		offset := uint32(off)
+
+		memory := m.LinearMemoryIndexSpace[entry.MemIdx]
+		if uint64(offset)+uint64(len(entry.Init)) > uint64(len(memory)) {
+			data := make([]byte, uint64(offset)+uint64(len(entry.Init)))
+			copy(data, memory)
+			copy(data[offset:], entry.Init)
+			m.LinearMemoryIndexSpace[int(entry.MemIdx)] = data
+		} else {
+			copy(memory[offset:], entry.Init)
+		}
+	}
+
 	return nil
 }
 

@@ -2,6 +2,7 @@ package vm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"log"
 	"math"
@@ -25,21 +26,44 @@ const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
+const wasmPageSize = 64 * 1024
+
+const maxSize = math.MaxUint32
+
+// HostFunction defines imported functions defined in host
+type HostFunction func(vm *VM, args ...uint64) uint64
+
+// ImportResolver looks up the host imports
+type ImportResolver interface {
+	GetFunction(module, name string) HostFunction
+}
+
+// FunctionImport stores information about host function and the host function itself
+type FunctionImport struct {
+	module    string
+	name      string
+	signature *wasm.FuncType
+	function  *HostFunction
+}
+
 // VM virtual machine
 type VM struct {
-	Module      *wasm.Module
-	stack       []uint64
-	sp          int //point to the next available slot
-	frames      []*Frame
-	framesIndex int
-	globals     []uint64
-	blocks      []*Block
-	blocksIndex int
-	breakDepth  int
+	Module          *wasm.Module
+	stack           []uint64
+	sp              int //point to the next available slot
+	frames          []*Frame
+	framesIndex     int
+	globals         []uint64
+	blocks          []*Block
+	blocksIndex     int
+	breakDepth      int
+	memory          []byte
+	functionImports []FunctionImport
+	importResolver  ImportResolver
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte) (_retVM *VM, retErr error) {
+func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader)
 	if err != nil {
@@ -47,17 +71,44 @@ func NewVM(code []byte) (_retVM *VM, retErr error) {
 	}
 
 	vm := &VM{
-		Module:      m,
-		stack:       make([]uint64, StackSize),
-		frames:      make([]*Frame, MaxFrames),
-		globals:     make([]uint64, len(m.GlobalIndexSpace)),
-		framesIndex: 0,
-		sp:          0,
-		blocks:      make([]*Block, MaxBlocks),
-		blocksIndex: 0,
-		breakDepth:  -1,
+		Module:         m,
+		stack:          make([]uint64, StackSize),
+		frames:         make([]*Frame, MaxFrames),
+		globals:        make([]uint64, len(m.GlobalIndexSpace)),
+		framesIndex:    0,
+		sp:             0,
+		blocks:         make([]*Block, MaxBlocks),
+		blocksIndex:    0,
+		breakDepth:     -1,
+		memory:         make([]byte, wasmPageSize),
+		importResolver: importResolver,
 	}
+	if m.Memory != nil && len(m.Memory.Mems) != 0 {
+		vm.memory = make([]byte, uint(m.Memory.Mems[0].Limits.Min)*wasmPageSize)
+		copy(vm.memory, m.LinearMemoryIndexSpace[0])
+	}
+
+	functionImports := make([]FunctionImport, 0)
+	if m.Import != nil {
+		for _, entry := range m.Import.Imports {
+			switch entry.ImportDesc.Kind {
+			case wasm.ExternalFunction:
+				typeIndex := entry.ImportDesc.TypeIdx
+				functionImports = append(functionImports, FunctionImport{
+					module:    entry.ModuleName,
+					name:      entry.FieldName,
+					signature: &m.Types.FuncTypes[typeIndex],
+				})
+			default:
+				log.Println("Import not supported")
+			}
+		}
+	}
+	vm.functionImports = functionImports
 	vm.initGlobals()
+	if m.Start != nil { // called after module loading
+		vm.Invoke(uint64(m.Start.FuncIdx)) // start does not take args or return
+	}
 	return vm, nil
 }
 
@@ -66,36 +117,32 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 	for _, arg := range args {
 		vm.push(arg)
 	}
-
-	vm.setupFrame(int(fidx))
+	vm.CallFunction(int(fidx))
 	return vm.interpret()
 }
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	for i := range vm.Module.Export.Exports {
-		if vm.Module.Export.Exports[i].Name == name {
-			return uint64(vm.Module.Export.Exports[i].ExportDesc.Idx), true
+	// fmt.Println(vm.Module)
+	if vm.Module.Export != nil {
+		if entry, ok := vm.Module.Export.Entries[name]; ok {
+			return uint64(entry.Desc.Idx), ok
 		}
 	}
-	// if entry, ok := vm.Module.Export.Exports; ok {
-	// 	return uint64(entry.Index), ok
-	// }
 	return 0, false
 }
 
 func (vm *VM) interpret() uint64 {
 	for {
 		for {
-			if vm.currentFrame().hasEnded() {
-				// fmt.Println("pop frame", vm.framesIndex-1, vm.stack[:10], vm.sp)
-				vm.popFrame()
-				if vm.framesIndex == 0 {
-					if vm.sp > 0 {
-						return vm.pop()
-					}
-					return 0
+			if vm.framesIndex == 0 {
+				if vm.sp > 0 {
+					return vm.pop()
 				}
+				return 0
+			}
+			if vm.currentFrame().hasEnded() {
+				vm.popFrame()
 			} else {
 				break
 			}
@@ -104,59 +151,51 @@ func (vm *VM) interpret() uint64 {
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
 		// fmt.Printf("op %d 0x%x\n", op, op)
-		if vm.inoperative() && vm.skipInstructions(op) {
+		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
 		fmt.Printf("Op: %+v\n", op)
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
-
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
 			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.Loop:
 			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
-			if vm.inoperative() {
-				vm.breakDepth++
-			}
 		case op == opcode.If:
 			returnType := wasm.ValueType(frame.readLEB(32, true))
 			block := NewBlock(frame.ip, typeIf, returnType, vm.sp)
 			vm.pushBlock(block)
-			block.executeElse = false
-			if !vm.inoperative() {
-				cond := vm.pop()
-				block.executeElse = (cond == 0)
-				if block.executeElse {
-					vm.blockJump(0)
-				}
+			cond := vm.pop()
+			block.executeElse = (cond == 0)
+			if block.executeElse {
+				vm.blockJump(0)
 			}
 		case op == opcode.Else:
 			block := vm.blocks[vm.blocksIndex-1]
 			if block.blockType != typeIf {
 				log.Fatal("No matching If for Else block")
 			}
-			if block.executeElse {
+			if block.executeElse { // infers vm.operative() == true enterring if
 				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
-			}
-			if !vm.inoperative() {
-				if !block.executeElse {
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			} else {
+				if vm.operative() {
 					vm.blockJump(0)
 				}
 			}
 		case op == opcode.End:
 			block := vm.popBlock()
-			if block.basePointer < vm.sp {
+			if block.basePointer < vm.sp { // block has return value
 				if block.returnType != wasm.ValueType(wasm.BlockTypeEmpty) {
 					retVal := castReturnValue(vm.pop(), block.returnType)
 					vm.push(retVal)
@@ -165,7 +204,12 @@ func (vm *VM) interpret() uint64 {
 				vm.sp = block.basePointer
 				vm.push(ret)
 			}
-			vm.breakDepth--
+			if !vm.operative() {
+				vm.breakDepth--
+				if vm.breakDepth < -1 {
+					panic("Invalid break recover")
+				}
+			}
 		case op == opcode.Br:
 			arg := frame.readLEB(32, false)
 			vm.blockJump(int(arg))
@@ -198,9 +242,8 @@ func (vm *VM) interpret() uint64 {
 			// TODO validate jump
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
-			fidx := frame.readLEB(32, false)
-			vm.setupFrame(int(fidx))
-			continue
+			fidx := int(frame.readLEB(32, false))
+			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
 			expectedFuncSig := wasm.FuncType(vm.Module.Types.FuncTypes[sigIndex])
@@ -211,9 +254,10 @@ func (vm *VM) interpret() uint64 {
 				log.Fatal("Out of bound table access")
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			vm.assertFuncSig(fidx, &expectedFuncSig)
-			vm.setupFrame(int(fidx))
-			continue
+			vm.CallFunction(fidx)
+			if fidx >= len(vm.functionImports) {
+				vm.assertFuncSig(fidx, &expectedFuncSig)
+			}
 		case op == opcode.Drop:
 			vm.pop()
 		case op == opcode.Select:
@@ -243,7 +287,77 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.SetGlobal:
 			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
-
+		case opcode.I32Load <= op && op <= opcode.I64Load32U:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			//todo inbound access check
+			switch op {
+			case opcode.I32Load, opcode.F32Load:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load, opcode.F64Load:
+				v := binary.LittleEndian.Uint64(curMem)
+				vm.push(v)
+			case opcode.I32Load8S, opcode.I64Load8S:
+				vm.push(uint64(int8(vm.memory[address])))
+			case opcode.I32Load8U, opcode.I64Load8U:
+				vm.push(uint64(vm.memory[address]))
+			case opcode.I32Load16S, opcode.I64Load16S:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(int16(v)))
+			case opcode.I32Load16U, opcode.I64Load16U:
+				v := binary.LittleEndian.Uint16(curMem)
+				vm.push(uint64(v))
+			case opcode.I64Load32S:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(int32(v)))
+			case opcode.I64Load32U:
+				v := binary.LittleEndian.Uint32(curMem)
+				vm.push(uint64(v))
+			}
+		case opcode.I32Store <= op && op <= opcode.I64Store32:
+			frame.readLEB(32, false) // alighment
+			offset := int(frame.readLEB(32, false))
+			v := vm.pop()
+			address := int(vm.pop())
+			address += offset
+			curMem := vm.memory[address:]
+			switch op {
+			case opcode.I32Store, opcode.F32Store:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			case opcode.I64Store, opcode.F64Store:
+				binary.LittleEndian.PutUint64(curMem, v)
+			case opcode.I32Store8, opcode.I64Store8:
+				vm.memory[address] = byte(v)
+			case opcode.I32Store16, opcode.I64Store16:
+				binary.LittleEndian.PutUint16(curMem, uint16(v))
+			case opcode.I64Store32:
+				binary.LittleEndian.PutUint32(curMem, uint32(v))
+			}
+		case op == opcode.MemorySize:
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
+			pages := len(vm.memory) / wasmPageSize
+			vm.push(uint64(pages))
+		case op == opcode.MemoryGrow:
+			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
+			pages := len(vm.memory) / wasmPageSize
+			n := int(vm.pop())
+			limit := vm.Module.Memory.Mems[0].Limits
+			maxPages := maxSize / wasmPageSize
+			if limit.Flag == 1 && maxPages > int(limit.Max) {
+				maxPages = int(limit.Max)
+			}
+			if pages+n >= pages && pages+n <= maxPages {
+				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+			} else {
+				pages = -1
+			}
+			vm.push(uint64(uint32(pages)))
+		case op == opcode.F64ReinterpretI64:
+			vm.push(math.Float64bits(math.Float64frombits(vm.pop())))
 		// I32 Ops
 		case op == opcode.I32Const:
 			val := frame.readLEB(32, true)
@@ -579,15 +693,21 @@ func (vm *VM) interpret() uint64 {
 				cBits = math.Float32bits(a)&^f32SignMask | math.Float32bits(b)&f32SignMask
 			}
 			vm.push(uint64(cBits))
-
-		case opcode.F32Abs <= op && op <= opcode.F32Sqrt:
+		// Upscale float64 cause loss data, use bitwise instead
+		case op == opcode.F32Neg || op == opcode.F32Abs:
+			fBits := uint32(vm.pop())
+			var rBits uint32
+			switch op {
+			case opcode.F32Abs:
+				rBits = fBits &^ f32SignMask
+			case opcode.F32Neg:
+				rBits = fBits ^ f32SignMask
+			}
+			vm.push(uint64(rBits))
+		case opcode.F32Ceil <= op && op <= opcode.F32Sqrt:
 			f := float64(math.Float32frombits(uint32(vm.pop())))
 			var r float64
 			switch op {
-			case opcode.F32Abs:
-				r = math.Abs(f)
-			case opcode.F32Neg:
-				r = -f
 			case opcode.F32Ceil:
 				r = math.Ceil(f)
 			case opcode.F32Floor:
@@ -812,8 +932,13 @@ func (vm *VM) interpret() uint64 {
 func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 	frame := vm.currentFrame()
 	switch {
-	case op == opcode.Block || op == opcode.Loop || op == opcode.End || op == opcode.If || op == opcode.Else:
+	case op == opcode.End || op == opcode.Else: // control end
 		return false
+	case op == opcode.Block || op == opcode.Loop || op == opcode.If:
+		returnType := wasm.ValueType(frame.readLEB(32, true))
+		block := NewBlock(frame.ip, getBlockType(op), returnType, vm.sp)
+		vm.pushBlock(block)
+		vm.breakDepth++
 	case op == opcode.Br || op == opcode.BrIf || op == opcode.Call:
 		fallthrough
 	case opcode.GetLocal <= op && op <= opcode.SetGlobal:
@@ -822,6 +947,15 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 		frame.readLEB(32, false)
 	case op == opcode.I64Const:
 		frame.readLEB(64, false)
+	case op == opcode.F32Const:
+		frame.readUint32()
+	case op == opcode.F64Const:
+		frame.readUint64()
+	case opcode.I32Load <= op && op <= opcode.I64Store32:
+		frame.readLEB(32, false)
+		frame.readLEB(32, false)
+	case op == opcode.MemorySize || op == opcode.MemoryGrow:
+		frame.readLEB(1, false)
 	case op == opcode.CallIndirect:
 		frame.readLEB(32, false)
 		frame.readLEB(1, false)
@@ -835,8 +969,8 @@ func (vm *VM) skipInstructions(op opcode.Opcode) bool {
 }
 
 // inoperative vm skips instructions if there is at least 1 level of block to break out of
-func (vm *VM) inoperative() bool {
-	return vm.breakDepth > -1
+func (vm *VM) operative() bool {
+	return vm.breakDepth == -1
 }
 
 func (vm *VM) blockJump(breakDepth int) {
@@ -851,6 +985,7 @@ func (vm *VM) blockJump(breakDepth int) {
 	}
 	jumpBlock := vm.blocks[vm.blocksIndex-1-breakDepth]
 	if jumpBlock.blockType == typeLoop {
+		vm.blocksIndex = vm.blocksIndex - breakDepth
 		vm.currentFrame().ip = jumpBlock.labelPointer
 	} else {
 		vm.breakDepth = breakDepth
@@ -858,7 +993,7 @@ func (vm *VM) blockJump(breakDepth int) {
 }
 
 func (vm *VM) setupFrame(fidx int) {
-	fn := vm.Module.GetFunction(fidx)
+	fn := vm.GetFunction(fidx)
 	fmt.Printf("%+v\n", fn)
 	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
@@ -939,7 +1074,7 @@ func (vm *VM) popBlock() *Block {
 
 func (vm *VM) initGlobals() error {
 	for i, global := range vm.Module.GlobalIndexSpace {
-		val, err := vm.Module.ExecInitExpr(global.Exprs)
+		val, err := vm.Module.ExecInitExpr(global.Init)
 		if err != nil {
 			return err
 		}
@@ -959,7 +1094,7 @@ func (vm *VM) initGlobals() error {
 }
 
 func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
-	signature := vm.Module.GetFunction(fidx).Type
+	signature := vm.GetFunction(fidx).Type
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
 		panic("Mismatch function signature")
@@ -974,4 +1109,34 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
 			panic("Mismatch function signature")
 		}
 	}
+}
+
+// GetFunction wraps module get function to take imports into account
+func (vm *VM) GetFunction(fidx int) *wasm.Function {
+	return vm.Module.GetFunction(fidx - len(vm.functionImports))
+}
+
+// CallFunction Either invoke an imported function or align the new frame for the incoming interpretation
+func (vm *VM) CallFunction(fidx int) {
+	if fidx < len(vm.functionImports) {
+		fi := vm.functionImports[fidx]
+		hf := vm.importResolver.GetFunction(fi.module, fi.name)
+		argSize := len(fi.signature.ParamTypes)
+		args := make([]uint64, argSize)
+		for i := argSize - 1; i >= 0; i-- {
+			args[i] = vm.pop()
+		}
+		ret := hf(vm, args...)
+		vm.push(ret)
+	} else {
+		vm.setupFrame(fidx)
+	}
+}
+
+func (vm *VM) GetMemory() []byte {
+	return vm.memory
+}
+
+func (vm *VM) ExtendMemory(n int) {
+	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
 }
