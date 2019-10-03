@@ -2,7 +2,6 @@ package wasm
 
 import (
 	"bytes"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -315,11 +314,11 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 
 	// var buffer bytes.Buffer
 	sectionReader := io.LimitReader(r, int64(datalen))
-	buffer, _ := ioutil.ReadAll(sectionReader)
-	sectionReader = bytes.NewBuffer(buffer)
+	// buffer, _ := ioutil.ReadAll(sectionReader)
+	// sectionReader = bytes.NewBuffer(buffer)
 	// sectionReader.Read(a)
-	fmt.Println(id)
-	fmt.Printf("%s", hex.Dump(buffer))
+	// fmt.Println(id)
+	// fmt.Printf("%s", hex.Dump(buffer))
 
 	switch id {
 	case 0:
@@ -717,8 +716,6 @@ func readSectionData(m *Module, r io.Reader) error {
 
 		m.Data.DataEntries[i].Init, err = ReadBytes(r, byteCount)
 	}
-
-	fmt.Println(m.Data)
 	return nil
 }
 

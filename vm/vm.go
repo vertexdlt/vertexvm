@@ -3,7 +3,6 @@ package vm
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"math"
 	"math/bits"
@@ -123,7 +122,6 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	// fmt.Println(vm.Module)
 	if vm.Module.Export != nil {
 		if entry, ok := vm.Module.Export.Entries[name]; ok {
 			return uint64(entry.Desc.Idx), ok
@@ -154,7 +152,6 @@ func (vm *VM) interpret() uint64 {
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
-		fmt.Printf("Op: %+v\n", op)
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
@@ -447,7 +444,7 @@ func (vm *VM) interpret() uint64 {
 				c = a * b
 			case opcode.I32DivS:
 				if b == 0 {
-					panic("integer division by zero")
+					panic("integer divide by zero")
 				}
 				if a == math.MaxInt32+1 && b == math.MaxInt32 {
 					panic("signed integer overflow")
@@ -994,7 +991,6 @@ func (vm *VM) blockJump(breakDepth int) {
 
 func (vm *VM) setupFrame(fidx int) {
 	fn := vm.GetFunction(fidx)
-	fmt.Printf("%+v\n", fn)
 	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
@@ -1065,7 +1061,6 @@ func (vm *VM) pushBlock(block *Block) {
 
 func (vm *VM) popBlock() *Block {
 	vm.blocksIndex--
-	fmt.Printf("BlockIndex: %+v\n", vm.blocksIndex)
 	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
 		panic("cannot find matching block opening")
 	}
@@ -1078,7 +1073,6 @@ func (vm *VM) initGlobals() error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%+v", val)
 		switch v := val.(type) {
 		case int32:
 			vm.globals[i] = uint64(v)
