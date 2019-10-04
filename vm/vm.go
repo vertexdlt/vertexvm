@@ -59,10 +59,11 @@ type VM struct {
 	memory          []byte
 	functionImports []FunctionImport
 	importResolver  ImportResolver
+	gas             *Gas
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
+func NewVM(code []byte, gas *Gas, importResolver ImportResolver) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -81,6 +82,7 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		breakDepth:     -1,
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
+		gas:            gas,
 	}
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
@@ -148,6 +150,17 @@ func (vm *VM) interpret() uint64 {
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
+		// Check gas
+		if vm.gas != nil {
+			log.Printf("Gas limit: %d, used: %d", vm.gas.limit, vm.gas.used)
+			remainingGas := vm.gas.limit - vm.gas.used
+			opGas := GetGasCost(op)
+			if remainingGas < opGas {
+				panic("out out gas")
+			} else {
+				vm.gas.used = vm.gas.used + opGas
+			}
+		}
 		// fmt.Printf("op %d 0x%x\n", op, op)
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
