@@ -352,7 +352,8 @@ func TestWasmSuite(t *testing.T) {
 }
 
 func TestEnoughGas(t *testing.T) {
-	vm := getVM("i32", &Gas{limit: 100, used: 0})
+	gas := Gas{limit: 100, used: 0}
+	vm := getVM("i32", &gas)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")
@@ -361,7 +362,8 @@ func TestEnoughGas(t *testing.T) {
 }
 
 func TestOutOfGas(t *testing.T) {
-	vm := getVM("i32", &Gas{limit: 10, used: 0})
+	gas := Gas{limit: 100, used: 0}
+	vm := getVM("i32", &gas)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")

@@ -132,6 +132,22 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
+func (vm *VM) burnGas(cost uint64) {
+	if vm.gas != nil {
+		log.Printf("Gas limit: %d, used: %d", vm.gas.limit, vm.gas.used)
+		remainingGas := vm.gas.limit - vm.gas.used
+		if remainingGas < cost {
+			panic("out out gas")
+		} else {
+			vm.gas.used = vm.gas.used + cost
+		}
+	}
+}
+
+func (vm *VM) burnGasForOp(op opcode.Opcode) {
+	vm.burnGas(GetGasCost(op))
+}
+
 func (vm *VM) interpret() uint64 {
 	for {
 		for {
@@ -150,17 +166,7 @@ func (vm *VM) interpret() uint64 {
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
-		// Check gas
-		if vm.gas != nil {
-			log.Printf("Gas limit: %d, used: %d", vm.gas.limit, vm.gas.used)
-			remainingGas := vm.gas.limit - vm.gas.used
-			opGas := GetGasCost(op)
-			if remainingGas < opGas {
-				panic("out out gas")
-			} else {
-				vm.gas.used = vm.gas.used + opGas
-			}
-		}
+		vm.burnGasForOp(op)
 		// fmt.Printf("op %d 0x%x\n", op, op)
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
