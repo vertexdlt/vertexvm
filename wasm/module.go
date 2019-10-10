@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"unicode/utf8"
 
 	"github.com/vertexdlt/vertexvm/leb128"
@@ -301,8 +300,9 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	if lastID != nil && *lastID != 0 {
-		if *lastID >= id {
+		if *lastID >= id && id != 0 {
 			return nil, fmt.Errorf("wasm: sections must occur at most once and in the prescribed order")
 		}
 	}
@@ -312,19 +312,15 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 		return nil, err
 	}
 
-	// var buffer bytes.Buffer
 	sectionReader := io.LimitReader(r, int64(datalen))
 	// buffer, _ := ioutil.ReadAll(sectionReader)
 	// sectionReader = bytes.NewBuffer(buffer)
-	// sectionReader.Read(a)
 	// fmt.Println(id)
-	// fmt.Printf("%s", hex.Dump(buffer))
 
 	switch id {
 	case 0:
 		// Skip custom section
 		io.CopyN(ioutil.Discard, sectionReader, int64(datalen))
-		log.Println("Custom Section not supported, skipped")
 	case 1:
 		err := readSectionType(m, sectionReader)
 		if err != nil {
@@ -383,6 +379,9 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 	default:
 		return nil, fmt.Errorf("wasm: read section error - unknown section id %d", id)
 	}
+
+	// Read any remaining byte from sectionReader
+	_, err = ioutil.ReadAll(sectionReader)
 	return &id, err
 }
 
