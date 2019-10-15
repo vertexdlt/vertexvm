@@ -21,7 +21,8 @@ const (
 
 type Function struct {
 	Type FuncType
-	Body Func
+	// Body Func //COMMENT removed, add Code
+	Code Code
 	Name string
 }
 
@@ -30,17 +31,17 @@ type Function struct {
 type Module struct {
 	Version uint32
 
-	Types    *TypeSec
-	Import   *ImportSec
-	Function *FuncSec
-	Table    *TableSec
-	Memory   *MemorySec
-	Global   *GlobalSec
-	Export   *ExportSec
-	Start    *StartSec
-	Element  *ElementSec
-	Code     *CodeSec
-	Data     *DataSec
+	TypeSec    *TypeSec //COMMENT add sec to all names
+	ImportSec  *ImportSec
+	FuncSec    *FuncSec
+	TableSec   *TableSec
+	MemSec     *MemSec //COMMENT -> MemSec
+	GlobalSec  *GlobalSec
+	ExportSec  *ExportSec
+	StartSec   *StartSec
+	ElementSec *ElementSec
+	CodeSec    *CodeSec
+	DataSec    *DataSec
 
 	FunctionIndexSpace []Function
 	GlobalIndexSpace   []Global

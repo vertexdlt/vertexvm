@@ -41,8 +41,8 @@ const ElemTypeFuncRef byte = 0x70
 // ValueType represent ValueType
 type ValueType int8
 
-// Mut represent mutability
-type Mut uint8
+// Mutability represent mutability
+type Mutability uint8 //COMMENT Mutability
 
 // Import represent the Import component
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-import
@@ -140,7 +140,9 @@ type Element struct {
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-code
 type Code struct {
 	Size uint32
-	Func Func
+	// Func Func // COMMENT, removed - add locals + body
+	Locals []Local
+	Exprs  []byte
 }
 
 // Data represent the data entry of the Data section
@@ -150,18 +152,11 @@ type Data struct {
 	Init   []byte
 }
 
-// LocalEntry represent the count Locals of the same value type
+// Local represent the count Locals of the same value type
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-local
-type LocalEntry struct {
+type Local struct { //COMMENT -> Local
 	Count     uint32
 	ValueType ValueType
-}
-
-// Func represent the function code which consists of locals & function's body
-// https://webassembly.github.io/spec/core/binary/modules.html#binary-func
-type Func struct {
-	Locals []LocalEntry
-	Exprs  []byte
 }
 
 // TypeSec represent the Type Section
@@ -179,7 +174,7 @@ type ImportSec struct {
 // FuncSec represent the Function Section
 // https://webassembly.github.io/spec/core/binary/modules.html#function-section
 type FuncSec struct {
-	TypeIndexes []uint32
+	TypeIndices []uint32 //COMMENT -> TypeIndices uint32 -> TypeIdx
 }
 
 // TableSec represent the Table Section
@@ -188,9 +183,9 @@ type TableSec struct {
 	Tables []Table
 }
 
-// MemorySec represent the Memory Section
+// MemSec represent the Memory Section
 // https://webassembly.github.io/spec/core/binary/modules.html#memory-section
-type MemorySec struct {
+type MemSec struct { //COMMENT -> MemSec
 	Mems []Mem
 }
 
@@ -203,13 +198,13 @@ type GlobalSec struct {
 // ExportSec represent the Export Section
 // https://webassembly.github.io/spec/core/binary/modules.html#export-section
 type ExportSec struct {
-	Entries map[string]Export
+	ExportMap map[string]Export //COMMENT -> ExportMap
 }
 
 // StartSec represent the Start Section
 // https://webassembly.github.io/spec/core/binary/modules.html#start-section
 type StartSec struct {
-	FuncIdx uint32
+	FuncIdx uint32 //COMMENT uint32 -> FuncIdx
 }
 
 // ElementSec represent the Element Section
@@ -226,7 +221,7 @@ type CodeSec struct {
 
 // DataSec represent the Data Section
 type DataSec struct {
-	DataEntries []Data
+	DataSegments []Data //COMMENT -> DataSegments
 }
 
 // ReadModule read a module from Reader r and return a constructed Module
