@@ -12,7 +12,7 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	machine, err := vm.NewVM(data)
+	machine, err := vm.NewVM(data, nil)
 	if err != nil {
 		panic(err)
 	}
