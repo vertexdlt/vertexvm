@@ -111,8 +111,6 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 		}
 	}
 
-	fmt.Printf("%+v", stack)
-
 	if len(stack) == 0 {
 		return nil, nil
 	}
