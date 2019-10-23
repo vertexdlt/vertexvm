@@ -25,9 +25,14 @@ const MaxBrTableSize = 64 * 1024
 
 const f32SignMask = 1 << 31
 
+const f64SignMask = 1 << 63
+
 const wasmPageSize = 64 * 1024
 
 const maxSize = math.MaxUint32
+
+const f32CanoncialNaNBits = uint64(0x7fc00000)
+const f64CanonicalNaNBits = uint64(0x7ff8000000000000)
 
 // HostFunction defines imported functions defined in host
 type HostFunction func(vm *VM, args ...uint64) uint64
@@ -661,36 +666,39 @@ func (vm *VM) interpret() uint64 {
 			}
 			vm.push(c)
 
-		case opcode.F32Add <= op && op <= opcode.F32Copysign:
+		case opcode.F32Add <= op && op <= opcode.F32Max:
 			bBits := uint32(vm.pop())
 			b := math.Float32frombits(bBits)
 			aBits := uint32(vm.pop())
 			a := math.Float32frombits(aBits)
-			var cBits uint32
+			var c float32
 			switch op {
 			case opcode.F32Add:
-				cBits = math.Float32bits(a + b)
+				c = a + b
 			case opcode.F32Sub:
-				cBits = math.Float32bits(a - b)
+				c = a - b
 			case opcode.F32Mul:
-				cBits = math.Float32bits(a * b)
+				c = a * b
 			case opcode.F32Div:
-				cBits = math.Float32bits(a / b)
+				c = a / b
 			case opcode.F32Min:
-				cBits = aBits
-				if a > b || (a == b && bBits&f32SignMask != 0) {
-					cBits = bBits
-				}
+				c = float32(math.Min(float64(a), float64(b)))
 			case opcode.F32Max:
-				cBits = aBits
-				if a < b || (a == b && bBits&f32SignMask == 0) {
-					cBits = bBits
-				}
-			case opcode.F32Copysign:
-				cBits = math.Float32bits(a)&^f32SignMask | math.Float32bits(b)&f32SignMask
+				c = float32(math.Max(float64(a), float64(b)))
 			}
+			if math.IsNaN(float64(c)) {
+				vm.push(f32CanoncialNaNBits)
+			} else {
+				vm.push(uint64(math.Float32bits(c)))
+			}
+
+		// copysign, abs, neg use bitwise to ensure arch independent
+		case op == opcode.F32Copysign:
+			bBits := uint32(vm.pop())
+			aBits := uint32(vm.pop())
+			cBits := aBits&^f32SignMask | bBits&f32SignMask
 			vm.push(uint64(cBits))
-		// Upscale float64 cause loss data, use bitwise instead
+
 		case op == opcode.F32Neg || op == opcode.F32Abs:
 			fBits := uint32(vm.pop())
 			var rBits uint32
@@ -701,6 +709,7 @@ func (vm *VM) interpret() uint64 {
 				rBits = fBits ^ f32SignMask
 			}
 			vm.push(uint64(rBits))
+
 		case opcode.F32Ceil <= op && op <= opcode.F32Sqrt:
 			f := float64(math.Float32frombits(uint32(vm.pop())))
 			var r float64
@@ -716,8 +725,11 @@ func (vm *VM) interpret() uint64 {
 			case opcode.F32Sqrt:
 				r = math.Sqrt(f)
 			}
-
-			vm.push(uint64(math.Float32bits(float32(r))))
+			if math.IsNaN(r) {
+				vm.push(f32CanoncialNaNBits)
+			} else {
+				vm.push(uint64(math.Float32bits(float32(r))))
+			}
 
 		// F64 Ops
 		case op == opcode.F64Const:
@@ -767,7 +779,7 @@ func (vm *VM) interpret() uint64 {
 			}
 			vm.push(c)
 
-		case opcode.F64Add <= op && op <= opcode.F64Copysign:
+		case opcode.F64Add <= op && op <= opcode.F64Max:
 			b := math.Float64frombits(vm.pop())
 			a := math.Float64frombits(vm.pop())
 			var c float64
@@ -784,19 +796,35 @@ func (vm *VM) interpret() uint64 {
 				c = math.Min(a, b)
 			case opcode.F64Max:
 				c = math.Max(a, b)
-			case opcode.F64Copysign:
-				c = math.Copysign(a, b)
 			}
-			vm.push(math.Float64bits(c))
+			if math.IsNaN(c) {
+				vm.push(f64CanonicalNaNBits)
+			} else {
+				vm.push(math.Float64bits(c))
+			}
 
-		case opcode.F64Abs <= op && op <= opcode.F64Sqrt:
+		// copysign, abs, neg use bitwise to ensure arch independent
+		case op == opcode.F64Copysign:
+			bBits := vm.pop()
+			aBits := vm.pop()
+			cBits := aBits&^f64SignMask | bBits&f64SignMask
+			vm.push(cBits)
+
+		case op == opcode.F64Neg || op == opcode.F64Abs:
+			fBits := vm.pop()
+			var rBits uint64
+			switch op {
+			case opcode.F64Abs:
+				rBits = fBits &^ f64SignMask
+			case opcode.F64Neg:
+				rBits = fBits ^ f64SignMask
+			}
+			vm.push(rBits)
+
+		case opcode.F64Ceil <= op && op <= opcode.F64Sqrt:
 			f := math.Float64frombits(vm.pop())
 			var r float64
 			switch op {
-			case opcode.F64Abs:
-				r = math.Abs(f)
-			case opcode.F64Neg:
-				r = -f
 			case opcode.F64Ceil:
 				r = math.Ceil(f)
 			case opcode.F64Floor:
@@ -809,7 +837,11 @@ func (vm *VM) interpret() uint64 {
 				r = math.Sqrt(f)
 			}
 
-			vm.push(math.Float64bits(r))
+			if math.IsNaN(r) {
+				vm.push(f64CanonicalNaNBits)
+			} else {
+				vm.push(math.Float64bits(r))
+			}
 
 		// Conversion
 		case op == opcode.I32WrapI64:
@@ -911,11 +943,19 @@ func (vm *VM) interpret() uint64 {
 
 		case op == opcode.F32DemoteF64:
 			f := math.Float64frombits(vm.pop())
-			vm.push(uint64(math.Float32bits(float32(f))))
+			if math.IsNaN(f) {
+				vm.push(f32CanoncialNaNBits)
+			} else {
+				vm.push(uint64(math.Float32bits(float32(f))))
+			}
 
 		case op == opcode.F64PromoteF32:
 			f := math.Float32frombits(uint32(vm.pop()))
-			vm.push(math.Float64bits(float64(f)))
+			if math.IsNaN(float64(f)) {
+				vm.push(f64CanonicalNaNBits)
+			} else {
+				vm.push(math.Float64bits(float64(f)))
+			}
 
 		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
 			// Do nothing
