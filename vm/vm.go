@@ -699,16 +699,11 @@ func (vm *VM) interpret() uint64 {
 			cBits := aBits&^f32SignMask | bBits&f32SignMask
 			vm.push(uint64(cBits))
 
-		case op == opcode.F32Neg || op == opcode.F32Abs:
-			fBits := uint32(vm.pop())
-			var rBits uint32
-			switch op {
-			case opcode.F32Abs:
-				rBits = fBits &^ f32SignMask
-			case opcode.F32Neg:
-				rBits = fBits ^ f32SignMask
-			}
-			vm.push(uint64(rBits))
+		case op == opcode.F32Neg:
+			vm.push(uint64(uint32(vm.pop()) ^ f32SignMask))
+
+		case op == opcode.F32Abs:
+			vm.push(uint64(uint32(vm.pop()) &^ f32SignMask))
 
 		case opcode.F32Ceil <= op && op <= opcode.F32Sqrt:
 			f := float64(math.Float32frombits(uint32(vm.pop())))
@@ -810,16 +805,11 @@ func (vm *VM) interpret() uint64 {
 			cBits := aBits&^f64SignMask | bBits&f64SignMask
 			vm.push(cBits)
 
-		case op == opcode.F64Neg || op == opcode.F64Abs:
-			fBits := vm.pop()
-			var rBits uint64
-			switch op {
-			case opcode.F64Abs:
-				rBits = fBits &^ f64SignMask
-			case opcode.F64Neg:
-				rBits = fBits ^ f64SignMask
-			}
-			vm.push(rBits)
+		case op == opcode.F64Neg:
+			vm.push(vm.pop() ^ f64SignMask)
+
+		case op == opcode.F64Abs:
+			vm.push(vm.pop() &^ f64SignMask)
 
 		case opcode.F64Ceil <= op && op <= opcode.F64Sqrt:
 			f := math.Float64frombits(vm.pop())
