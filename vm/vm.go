@@ -686,11 +686,7 @@ func (vm *VM) interpret() uint64 {
 			case opcode.F32Max:
 				c = float32(math.Max(float64(a), float64(b)))
 			}
-			if math.IsNaN(float64(c)) {
-				vm.push(f32CanoncialNaNBits)
-			} else {
-				vm.push(uint64(math.Float32bits(c)))
-			}
+			vm.pushFloat32(c)
 
 		// copysign, abs, neg use bitwise to ensure arch independent
 		case op == opcode.F32Copysign:
@@ -720,11 +716,7 @@ func (vm *VM) interpret() uint64 {
 			case opcode.F32Sqrt:
 				r = math.Sqrt(f)
 			}
-			if math.IsNaN(r) {
-				vm.push(f32CanoncialNaNBits)
-			} else {
-				vm.push(uint64(math.Float32bits(float32(r))))
-			}
+			vm.pushFloat32(float32(r))
 
 		// F64 Ops
 		case op == opcode.F64Const:
@@ -792,11 +784,7 @@ func (vm *VM) interpret() uint64 {
 			case opcode.F64Max:
 				c = math.Max(a, b)
 			}
-			if math.IsNaN(c) {
-				vm.push(f64CanonicalNaNBits)
-			} else {
-				vm.push(math.Float64bits(c))
-			}
+			vm.pushFloat64(c)
 
 		// copysign, abs, neg use bitwise to ensure arch independent
 		case op == opcode.F64Copysign:
@@ -827,11 +815,7 @@ func (vm *VM) interpret() uint64 {
 				r = math.Sqrt(f)
 			}
 
-			if math.IsNaN(r) {
-				vm.push(f64CanonicalNaNBits)
-			} else {
-				vm.push(math.Float64bits(r))
-			}
+			vm.pushFloat64(r)
 
 		// Conversion
 		case op == opcode.I32WrapI64:
@@ -933,19 +917,11 @@ func (vm *VM) interpret() uint64 {
 
 		case op == opcode.F32DemoteF64:
 			f := math.Float64frombits(vm.pop())
-			if math.IsNaN(f) {
-				vm.push(f32CanoncialNaNBits)
-			} else {
-				vm.push(uint64(math.Float32bits(float32(f))))
-			}
+			vm.pushFloat32(float32(f))
 
 		case op == opcode.F64PromoteF32:
 			f := math.Float32frombits(uint32(vm.pop()))
-			if math.IsNaN(float64(f)) {
-				vm.push(f64CanonicalNaNBits)
-			} else {
-				vm.push(math.Float64bits(float64(f)))
-			}
+			vm.pushFloat64(float64(f))
 
 		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
 			// Do nothing
@@ -1046,6 +1022,22 @@ func (vm *VM) push(val uint64) {
 	}
 	vm.stack[vm.sp] = val
 	vm.sp++
+}
+
+func (vm *VM) pushFloat32(val float32) {
+	if math.IsNaN(float64(val)) {
+		vm.push(f32CanoncialNaNBits)
+	} else {
+		vm.push(uint64(math.Float32bits(val)))
+	}
+}
+
+func (vm *VM) pushFloat64(val float64) {
+	if math.IsNaN(val) {
+		vm.push(f64CanonicalNaNBits)
+	} else {
+		vm.push(math.Float64bits(val))
+	}
 }
 
 func (vm *VM) pop() uint64 {
