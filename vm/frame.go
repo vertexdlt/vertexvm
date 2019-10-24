@@ -1,9 +1,10 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/binary"
-	"log"
 
+	"github.com/vertexdlt/vertexvm/leb128"
 	"github.com/vertexdlt/vertexvm/wasm"
 )
 
@@ -28,28 +29,10 @@ func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 
 func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	ins := frame.instructions()
-	var (
-		shift  uint32
-		bitcnt uint32
-		cur    int64
-		result int64
-		sign   int64 = -1
-	)
-	for i := frame.ip + 1; i < len(ins); i++ {
-		cur = int64(ins[i])
-		result |= (cur & 0x7f) << shift
-		shift += 7
-		sign <<= 7
-		bitcnt++
-		if cur&0x80 == 0 {
-			break
-		}
-		if bitcnt > (maxbit+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
-		}
-	}
-	if hasSign && ((sign>>1)&result) != 0 {
-		result |= sign
+	r := bytes.NewReader(ins[frame.ip+1:])
+	bitcnt, result, err := leb128.Read(r, maxbit, hasSign)
+	if err != nil {
+		panic(err)
 	}
 	frame.ip += int(bitcnt)
 	return result

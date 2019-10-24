@@ -1,99 +1,74 @@
 package leb128
 
 import (
-	"errors"
 	"io"
+	"log"
 )
 
-// readVarUint reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
-// readVarUint panics if n>64.
-func readVarUint(r io.Reader, n uint) (uint64, error) {
-	if n > 64 {
-		panic(errors.New("leb128: n must <= 64"))
-	}
-	p := make([]byte, 1)
-	var res uint64
-	var shift uint
-	for {
-		_, err := io.ReadFull(r, p)
-		if err != nil {
-			return 0, err
-		}
-		b := uint64(p[0])
-		switch {
-		case b < 1<<7 && b < 1<<n:
-			res += (1 << shift) * b
-			return res, nil
-		case b >= 1<<7 && n > 7:
-			res += (1 << shift) * (b - 1<<7)
-			shift += 7
-			n -= 7
-		default:
-			return 0, errors.New("leb128: invalid uint")
-		}
-	}
-}
+// Read reads a LEB128 encoded integer from reader, specified by maxbit and hasSign
+func Read(r io.Reader, maxbit uint32, hasSign bool) (uint32, int64, error) {
+	var (
+		shift  uint32
+		bitcnt uint32
+		cur    int64
+		result int64
+		sign   int64 = -1
+	)
 
-// readVarint reads a signed integer of size n, defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
-// readVarint panics if n>64.
-func readVarint(r io.Reader, n uint) (int64, error) {
-	if n > 64 {
-		panic(errors.New("leb128: n must <= 64"))
-	}
 	p := make([]byte, 1)
-	var res int64
-	var shift uint
 	for {
 		_, err := io.ReadFull(r, p)
 		if err != nil {
-			return 0, err
+			return 0, 0, err
 		}
-		b := int64(p[0])
-		switch {
-		case b < 1<<6 && uint64(b) < uint64(1<<(n-1)):
-			res += (1 << shift) * b
-			return res, nil
-		case b >= 1<<6 && b < 1<<7 && uint64(b)+1<<(n-1) >= 1<<7:
-			res += (1 << shift) * (b - 1<<7)
-			return res, nil
-		case b >= 1<<7 && n > 7:
-			res += (1 << shift) * (b - 1<<7)
-			shift += 7
-			n -= 7
-		default:
-			return 0, errors.New("leb128: invalid int")
+		cur = int64(p[0])
+		result |= (cur & 0x7f) << shift
+		shift += 7
+		sign <<= 7
+		bitcnt++
+		if cur&0x80 == 0 {
+			break
+		}
+		if bitcnt > (maxbit+7-1)/7 {
+			log.Fatal("Unsigned LEB at byte overflow")
 		}
 	}
+
+	if hasSign && ((sign>>1)&result) != 0 {
+		result |= sign
+	}
+
+	return bitcnt, result, nil
 }
 
 // ReadUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadUint32(r io.Reader) (uint32, error) {
-	n, err := readVarUint(r, 32)
-	if err != nil {
-		return 0, err
-	}
-	return uint32(n), nil
+	sign := false
+	_, result, err := Read(r, 32, sign)
+	return uint32(result), err
 }
 
 // ReadInt32 reads a LEB128 encoded signed 32-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadInt32(r io.Reader) (int32, error) {
-	n, err := readVarint(r, 32)
-	if err != nil {
-		return 0, err
-	}
-	return int32(n), nil
+	sign := true
+	_, result, err := Read(r, 32, sign)
+	return int32(result), err
 }
 
 // ReadUint64 reads a LEB128 encoded unsigned 64-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadUint64(r io.Reader) (uint64, error) {
-	return readVarUint(r, 64)
+	sign := false
+	_, result, err := Read(r, 64, sign)
+	return uint64(result), err
 }
 
 // ReadInt64 reads a LEB128 encoded signed 64-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadInt64(r io.Reader) (int64, error) {
-	return readVarint(r, 64)
+	sign := true
+	_, result, err := Read(r, 64, sign)
+	return int64(result), err
 }
