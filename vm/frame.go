@@ -3,6 +3,7 @@ package vm
 import (
 	"bytes"
 	"encoding/binary"
+	"log"
 
 	"github.com/vertexdlt/vertexvm/leb128"
 	"github.com/vertexdlt/vertexvm/wasm"
@@ -32,7 +33,7 @@ func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	r := bytes.NewReader(ins[frame.ip+1:])
 	bitcnt, result, err := leb128.Read(r, maxbit, hasSign)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	frame.ip += int(bitcnt)
 	return result
