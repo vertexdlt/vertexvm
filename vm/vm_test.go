@@ -274,6 +274,13 @@ func TestWasmSuite(t *testing.T) {
 			if name == "linking" && cmd.Line >= 50 && cmd.Line <= 83 {
 				continue
 			}
+			// Skip min, max nan with inf tests
+			if (name == "f32" || name == "f64") && ((cmd.Line >= 1931 && cmd.Line <= 1938) ||
+				(cmd.Line >= 1995 && cmd.Line <= 2002) ||
+				(cmd.Line >= 2331 && cmd.Line <= 2338) ||
+				(cmd.Line >= 2395 && cmd.Line <= 2402)) {
+				continue
+			}
 			switch cmd.Type {
 			case "module":
 				data, err := ioutil.ReadFile(fmt.Sprintf("./test_suite/%s", cmd.Filename))
@@ -284,7 +291,7 @@ func TestWasmSuite(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-			case "assert_return", "action":
+			case "assert_return", "action", "assert_return_canonical_nan", "assert_return_arithmetic_nan":
 				switch cmd.Action.Type {
 				case "invoke":
 					funcID, ok := vm.GetFunctionIndex(cmd.Action.Field)
@@ -306,15 +313,34 @@ func TestWasmSuite(t *testing.T) {
 					// t.Log("ret", ret)
 
 					if len(cmd.Expected) != 0 {
-						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
-						if err != nil {
-							panic(err)
+						var exp uint64
+						if cmd.Type == "assert_return_canonical_nan" {
+							if cmd.Expected[0].Type == "f32" {
+								exp = 0x7fc00000
+							} else if cmd.Expected[0].Type == "f64" {
+								exp = 0x7ff8000000000000
+							}
+						} else if cmd.Type == "assert_return_arithmetic_nan" {
+							// An arithmetic NaN is a floating-point value ±𝗇𝖺𝗇(n) with n≥canonN, such that the most significant bit is 1 while all others are arbitrary.
+							// Unset sign bit, pass if >= canonical NaN in integer
+							if cmd.Expected[0].Type == "f32" && (uint32(ret)&^(1<<31)) >= uint32(0x7fc00000) {
+								exp = ret
+							}
+							if cmd.Expected[0].Type == "f64" && (ret&^(1<<63)) >= uint64(0x7ff8000000000000) {
+								exp = ret
+							}
+						} else {
+							exp, err = strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
+							if err != nil {
+								panic(err)
+							}
 						}
 
 						if cmd.Expected[0].Type == "i32" || cmd.Expected[0].Type == "f32" {
 							ret = uint64(uint32(ret))
 							exp = uint64(uint32(exp))
 						}
+
 						if ret != exp {
 							t.Errorf("Test %s Field %s Line %d: Expect return value to be %d, got %d", name, cmd.Action.Field, cmd.Line, exp, ret)
 						}
@@ -342,7 +368,8 @@ func TestWasmSuite(t *testing.T) {
 				default:
 					t.Errorf("unknown action %s", cmd.Action.Type)
 				}
-			case "assert_trap", "assert_invalid", "assert_return_canonical_nan", "assert_return_arithmetic_nan", "assert_exhaustion", "assert_malformed", "assert_uninstantiable", "assert_unlinkable":
+
+			case "assert_trap", "assert_invalid", "assert_exhaustion", "assert_malformed", "assert_uninstantiable", "assert_unlinkable":
 				t.Logf("Skipping %s", cmd.Type)
 			default:
 				t.Errorf("unknown command %s", cmd.Type)
