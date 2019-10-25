@@ -320,7 +320,7 @@ func TestWasmSuite(t *testing.T) {
 						}
 					}
 				case "get":
-					entry, ok := vm.Module.Export.Entries[cmd.Action.Field]
+					entry, ok := vm.Module.ExportSec.ExportMap[cmd.Action.Field]
 					if !ok {
 						panic("Global export not found")
 					}

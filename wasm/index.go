@@ -21,7 +21,7 @@ const (
 
 type Function struct {
 	Type FuncType
-	Body Func
+	Code Code
 	Name string
 }
 
@@ -30,17 +30,17 @@ type Function struct {
 type Module struct {
 	Version uint32
 
-	Types    *TypeSec
-	Import   *ImportSec
-	Function *FuncSec
-	Table    *TableSec
-	Memory   *MemorySec
-	Global   *GlobalSec
-	Export   *ExportSec
-	Start    *StartSec
-	Element  *ElementSec
-	Code     *CodeSec
-	Data     *DataSec
+	TypeSec    *TypeSec
+	ImportSec  *ImportSec
+	FuncSec    *FuncSec
+	TableSec   *TableSec
+	MemSec     *MemSec
+	GlobalSec  *GlobalSec
+	ExportSec  *ExportSec
+	StartSec   *StartSec
+	ElementSec *ElementSec
+	CodeSec    *CodeSec
+	DataSec    *DataSec
 
 	FunctionIndexSpace []Function
 	GlobalIndexSpace   []Global
@@ -131,28 +131,28 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 }
 
 func (m *Module) populateFunctions() error {
-	if m.Types == nil || m.Function == nil {
+	if m.TypeSec == nil || m.FuncSec == nil {
 		return nil
 	}
 
-	for codeIndex, typeIndex := range m.Function.TypeIndexes {
-		if int(typeIndex) >= len(m.Types.FuncTypes) {
+	for codeIndex, typeIndex := range m.FuncSec.TypeIndices {
+		if int(typeIndex) >= len(m.TypeSec.FuncTypes) {
 			return errors.New("Invalid function index")
 		}
 
 		// Create the main function structure
 		fn := Function{
-			Type: m.Types.FuncTypes[typeIndex],
-			Body: m.Code.Codes[codeIndex].Func,
+			Type: m.TypeSec.FuncTypes[typeIndex],
+			Code: m.CodeSec.Codes[codeIndex],
 			Name: "",
 		}
 
 		m.FunctionIndexSpace = append(m.FunctionIndexSpace, fn)
 	}
 
-	funcs := make([]uint32, 0, len(m.Function.TypeIndexes))
-	funcs = append(funcs, m.Function.TypeIndexes...)
-	m.Function.TypeIndexes = funcs
+	funcs := make([]uint32, 0, len(m.FuncSec.TypeIndices))
+	funcs = append(funcs, m.FuncSec.TypeIndices...)
+	m.FuncSec.TypeIndices = funcs
 	return nil
 }
 
@@ -165,11 +165,11 @@ func (m *Module) GetFunction(i int) *Function {
 }
 
 func (m *Module) populateGlobals() error {
-	if m.Global == nil {
+	if m.GlobalSec == nil {
 		return nil
 	}
 
-	m.GlobalIndexSpace = append(m.GlobalIndexSpace, m.Global.Globals...)
+	m.GlobalIndexSpace = append(m.GlobalIndexSpace, m.GlobalSec.Globals...)
 	return nil
 }
 
@@ -182,11 +182,11 @@ func (m *Module) GetGlobal(i int) *Global {
 }
 
 func (m *Module) populateTables() error {
-	if m.Table == nil || len(m.Table.Tables) == 0 || m.Element == nil || len(m.Element.Elements) == 0 {
+	if m.TableSec == nil || len(m.TableSec.Tables) == 0 || m.ElementSec == nil || len(m.ElementSec.Elements) == 0 {
 		return nil
 	}
 
-	for _, elem := range m.Element.Elements {
+	for _, elem := range m.ElementSec.Elements {
 		// the MVP dictates that index should always be zero, we should
 		// probably check this
 		if elem.TableIdx >= uint32(len(m.TableIndexSpace)) {
@@ -227,12 +227,12 @@ func (m *Module) GetTableElement(index int) (uint32, error) {
 }
 
 func (m *Module) populateLinearMemory() error {
-	if m.Data == nil || len(m.Data.DataEntries) == 0 {
+	if m.DataSec == nil || len(m.DataSec.DataSegments) == 0 {
 		return nil
 	}
 	// each module can only have a single linear memory in the MVP
 
-	for _, entry := range m.Data.DataEntries {
+	for _, entry := range m.DataSec.DataSegments {
 		if entry.MemIdx != 0 {
 			return errors.New("Invalid Linear Memory Index Error")
 		}

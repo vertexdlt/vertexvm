@@ -82,21 +82,21 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
 	}
-	if m.Memory != nil && len(m.Memory.Mems) != 0 {
-		vm.memory = make([]byte, uint(m.Memory.Mems[0].Limits.Min)*wasmPageSize)
+	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
+		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
 
 	functionImports := make([]FunctionImport, 0)
-	if m.Import != nil {
-		for _, entry := range m.Import.Imports {
+	if m.ImportSec != nil {
+		for _, entry := range m.ImportSec.Imports {
 			switch entry.ImportDesc.Kind {
 			case wasm.ExternalFunction:
 				typeIndex := entry.ImportDesc.TypeIdx
 				functionImports = append(functionImports, FunctionImport{
 					module:    entry.ModuleName,
 					name:      entry.FieldName,
-					signature: &m.Types.FuncTypes[typeIndex],
+					signature: &m.TypeSec.FuncTypes[typeIndex],
 				})
 			default:
 				log.Println("Import not supported")
@@ -105,8 +105,8 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 	}
 	vm.functionImports = functionImports
 	vm.initGlobals()
-	if m.Start != nil { // called after module loading
-		vm.Invoke(uint64(m.Start.FuncIdx)) // start does not take args or return
+	if m.StartSec != nil { // called after module loading
+		vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
 	}
 	return vm, nil
 }
@@ -122,8 +122,8 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if vm.Module.Export != nil {
-		if entry, ok := vm.Module.Export.Entries[name]; ok {
+	if vm.Module.ExportSec != nil {
+		if entry, ok := vm.Module.ExportSec.ExportMap[name]; ok {
 			return uint64(entry.Desc.Idx), ok
 		}
 	}
@@ -243,7 +243,7 @@ func (vm *VM) interpret() uint64 {
 			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
-			expectedFuncSig := wasm.FuncType(vm.Module.Types.FuncTypes[sigIndex])
+			expectedFuncSig := wasm.FuncType(vm.Module.TypeSec.FuncTypes[sigIndex])
 
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
@@ -342,7 +342,7 @@ func (vm *VM) interpret() uint64 {
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
 			pages := len(vm.memory) / wasmPageSize
 			n := int(vm.pop())
-			limit := vm.Module.Memory.Mems[0].Limits
+			limit := vm.Module.MemSec.Mems[0].Limits
 			maxPages := maxSize / wasmPageSize
 			if limit.Flag == 1 && maxPages > int(limit.Max) {
 				maxPages = int(limit.Max)
@@ -994,7 +994,7 @@ func (vm *VM) setupFrame(fidx int) {
 	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
-	for _, entry := range fn.Body.Locals {
+	for _, entry := range fn.Code.Locals {
 		numLocals += int(entry.Count)
 	}
 	// leave some space for locals

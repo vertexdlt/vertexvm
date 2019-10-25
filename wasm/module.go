@@ -40,8 +40,8 @@ const ElemTypeFuncRef byte = 0x70
 // ValueType represent ValueType
 type ValueType int8
 
-// Mut represent mutability
-type Mut uint8
+// Mutability represent mutability
+type Mutability uint8
 
 // Import represent the Import component
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-import
@@ -103,8 +103,8 @@ type Table struct {
 // GlobalType represent Global Types
 // from https://webassembly.github.io/spec/core/binary/types.html#global-types
 type GlobalType struct {
-	ValueType ValueType
-	Mut       Mut
+	ValueType  ValueType
+	Mutability Mutability
 }
 
 // Global represent the Global component
@@ -138,8 +138,9 @@ type Element struct {
 // Code represent the code entry of the Code section
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-code
 type Code struct {
-	Size uint32
-	Func Func
+	Size   uint32
+	Locals []Local
+	Exprs  []byte
 }
 
 // Data represent the data entry of the Data section
@@ -149,18 +150,11 @@ type Data struct {
 	Init   []byte
 }
 
-// LocalEntry represent the count Locals of the same value type
+// Local represent the count Locals of the same value type
 // https://webassembly.github.io/spec/core/binary/modules.html#binary-local
-type LocalEntry struct {
+type Local struct {
 	Count     uint32
 	ValueType ValueType
-}
-
-// Func represent the function code which consists of locals & function's body
-// https://webassembly.github.io/spec/core/binary/modules.html#binary-func
-type Func struct {
-	Locals []LocalEntry
-	Exprs  []byte
 }
 
 // TypeSec represent the Type Section
@@ -178,7 +172,7 @@ type ImportSec struct {
 // FuncSec represent the Function Section
 // https://webassembly.github.io/spec/core/binary/modules.html#function-section
 type FuncSec struct {
-	TypeIndexes []uint32
+	TypeIndices []uint32
 }
 
 // TableSec represent the Table Section
@@ -189,7 +183,7 @@ type TableSec struct {
 
 // MemorySec represent the Memory Section
 // https://webassembly.github.io/spec/core/binary/modules.html#memory-section
-type MemorySec struct {
+type MemSec struct {
 	Mems []Mem
 }
 
@@ -202,7 +196,7 @@ type GlobalSec struct {
 // ExportSec represent the Export Section
 // https://webassembly.github.io/spec/core/binary/modules.html#export-section
 type ExportSec struct {
-	Entries map[string]Export
+	ExportMap map[string]Export
 }
 
 // StartSec represent the Start Section
@@ -225,7 +219,7 @@ type CodeSec struct {
 
 // DataSec represent the Data Section
 type DataSec struct {
-	DataEntries []Data
+	DataSegments []Data
 }
 
 // ReadModule read a module from Reader r and return a constructed Module
@@ -251,8 +245,8 @@ func ReadModule(r io.Reader) (*Module, error) {
 			}
 
 			m.LinearMemoryIndexSpace = make([][]byte, 1)
-			if m.Table != nil {
-				m.TableIndexSpace = make([][]uint32, int(len(m.Table.Tables)))
+			if m.TableSec != nil {
+				m.TableIndexSpace = make([][]uint32, int(len(m.TableSec.Tables)))
 			}
 
 			for _, fn := range []func() error{
@@ -391,8 +385,8 @@ func readSectionType(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Types = &TypeSec{}
-	m.Types.FuncTypes = make([]FuncType, vectorLen)
+	m.TypeSec = &TypeSec{}
+	m.TypeSec.FuncTypes = make([]FuncType, vectorLen)
 	for i := uint32(0); i < vectorLen; i++ {
 		funcTypeForm, err := ReadByte(r)
 		if err != nil {
@@ -407,9 +401,9 @@ func readSectionType(m *Module, r io.Reader) error {
 			return err
 		}
 
-		m.Types.FuncTypes[i].ParamTypes = make([]ValueType, paramTypesCount)
+		m.TypeSec.FuncTypes[i].ParamTypes = make([]ValueType, paramTypesCount)
 		for j := uint32(0); j < paramTypesCount; j++ {
-			m.Types.FuncTypes[i].ParamTypes[j], err = readValueType(r)
+			m.TypeSec.FuncTypes[i].ParamTypes[j], err = readValueType(r)
 			if err != nil {
 				return err
 			}
@@ -420,9 +414,9 @@ func readSectionType(m *Module, r io.Reader) error {
 			return err
 		}
 
-		m.Types.FuncTypes[i].ReturnTypes = make([]ValueType, returnTypesCount)
+		m.TypeSec.FuncTypes[i].ReturnTypes = make([]ValueType, returnTypesCount)
 		for j := uint32(0); j < returnTypesCount; j++ {
-			m.Types.FuncTypes[i].ReturnTypes[j], err = readValueType(r)
+			m.TypeSec.FuncTypes[i].ReturnTypes[j], err = readValueType(r)
 			if err != nil {
 				return err
 			}
@@ -438,15 +432,15 @@ func readSectionImport(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Import = &ImportSec{}
-	m.Import.Imports = make([]Import, importCount)
+	m.ImportSec = &ImportSec{}
+	m.ImportSec.Imports = make([]Import, importCount)
 	for i := uint32(0); i < importCount; i++ {
-		m.Import.Imports[i].ModuleName, err = readName(r)
+		m.ImportSec.Imports[i].ModuleName, err = readName(r)
 		if err != nil {
 			return err
 		}
 
-		m.Import.Imports[i].FieldName, err = readName(r)
+		m.ImportSec.Imports[i].FieldName, err = readName(r)
 		if err != nil {
 			return err
 		}
@@ -491,7 +485,7 @@ func readSectionImport(m *Module, r io.Reader) error {
 		}
 
 		importDesc.Kind = kind
-		m.Import.Imports[i].ImportDesc = importDesc
+		m.ImportSec.Imports[i].ImportDesc = importDesc
 	}
 	return nil
 }
@@ -502,10 +496,10 @@ func readSectionFunction(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Function = &FuncSec{}
-	m.Function.TypeIndexes = make([]uint32, typeIdxCount)
+	m.FuncSec = &FuncSec{}
+	m.FuncSec.TypeIndices = make([]uint32, typeIdxCount)
 	for i := uint32(0); i < typeIdxCount; i++ {
-		m.Function.TypeIndexes[i], err = leb128.ReadUint32(r)
+		m.FuncSec.TypeIndices[i], err = leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
@@ -519,15 +513,15 @@ func readSectionTable(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Table = &TableSec{}
-	m.Table.Tables = make([]Table, tableCount)
+	m.TableSec = &TableSec{}
+	m.TableSec.Tables = make([]Table, tableCount)
 	for i := uint32(0); i < tableCount; i++ {
-		m.Table.Tables[i].ElemType, err = readElemType(r)
+		m.TableSec.Tables[i].ElemType, err = readElemType(r)
 		if err != nil {
 			return err
 		}
 
-		m.Table.Tables[i].Limits, err = readLimits(r)
+		m.TableSec.Tables[i].Limits, err = readLimits(r)
 		if err != nil {
 			return err
 		}
@@ -542,10 +536,10 @@ func readSectionMemory(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Memory = &MemorySec{}
-	m.Memory.Mems = make([]Mem, memCount)
+	m.MemSec = &MemSec{}
+	m.MemSec.Mems = make([]Mem, memCount)
 	for i := uint32(0); i < memCount; i++ {
-		m.Memory.Mems[i].Limits, err = readLimits(r)
+		m.MemSec.Mems[i].Limits, err = readLimits(r)
 		if err != nil {
 			return err
 		}
@@ -560,15 +554,15 @@ func readSectionGlobal(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Global = &GlobalSec{}
-	m.Global.Globals = make([]Global, globalCount)
+	m.GlobalSec = &GlobalSec{}
+	m.GlobalSec.Globals = make([]Global, globalCount)
 	for i := uint32(0); i < globalCount; i++ {
-		m.Global.Globals[i].Type, err = readGlobalType(r)
+		m.GlobalSec.Globals[i].Type, err = readGlobalType(r)
 		if err != nil {
 			return err
 		}
 
-		m.Global.Globals[i].Init, err = readExprs(r)
+		m.GlobalSec.Globals[i].Init, err = readExprs(r)
 		if err != nil {
 			return err
 		}
@@ -583,8 +577,8 @@ func readSectionExport(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Export = &ExportSec{}
-	m.Export.Entries = make(map[string]Export, exportCount)
+	m.ExportSec = &ExportSec{}
+	m.ExportSec.ExportMap = make(map[string]Export, exportCount)
 	for i := uint32(0); i < exportCount; i++ {
 		var export Export
 		export.Name, err = readName(r)
@@ -606,7 +600,7 @@ func readSectionExport(m *Module, r io.Reader) error {
 			return err
 		}
 
-		m.Export.Entries[export.Name] = export
+		m.ExportSec.ExportMap[export.Name] = export
 	}
 
 	return nil
@@ -614,8 +608,8 @@ func readSectionExport(m *Module, r io.Reader) error {
 
 func readSectionStart(m *Module, r io.Reader) error {
 	var err error
-	m.Start = &StartSec{}
-	m.Start.FuncIdx, err = leb128.ReadUint32(r)
+	m.StartSec = &StartSec{}
+	m.StartSec.FuncIdx, err = leb128.ReadUint32(r)
 	return err
 }
 
@@ -625,15 +619,15 @@ func readSectionElement(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Element = &ElementSec{}
-	m.Element.Elements = make([]Element, elementCount)
+	m.ElementSec = &ElementSec{}
+	m.ElementSec.Elements = make([]Element, elementCount)
 	for i := uint32(0); i < elementCount; i++ {
-		m.Element.Elements[i].TableIdx, err = leb128.ReadUint32(r)
+		m.ElementSec.Elements[i].TableIdx, err = leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
 
-		m.Element.Elements[i].Init, err = readExprs(r)
+		m.ElementSec.Elements[i].Init, err = readExprs(r)
 		if err != nil {
 			return err
 		}
@@ -650,7 +644,7 @@ func readSectionElement(m *Module, r io.Reader) error {
 				return err
 			}
 		}
-		m.Element.Elements[i].Offset = funcIdxes
+		m.ElementSec.Elements[i].Offset = funcIdxes
 	}
 
 	return nil
@@ -662,8 +656,8 @@ func readSectionCode(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Code = &CodeSec{}
-	m.Code.Codes = make([]Code, codeCount)
+	m.CodeSec = &CodeSec{}
+	m.CodeSec.Codes = make([]Code, codeCount)
 	for i := uint32(0); i < codeCount; i++ {
 		size, err := leb128.ReadUint32(r)
 		if err != nil {
@@ -676,14 +670,14 @@ func readSectionCode(m *Module, r io.Reader) error {
 		}
 
 		bytesReader := bytes.NewBuffer(codeBody)
-		m.Code.Codes[i].Func.Locals, err = readLocals(bytesReader)
+		m.CodeSec.Codes[i].Locals, err = readLocals(bytesReader)
 		if err != nil {
 			return err
 		}
 
 		code := bytesReader.Bytes()
-		m.Code.Codes[i].Func.Exprs = code[:len(code)-1]
-		m.Code.Codes[i].Size = size
+		m.CodeSec.Codes[i].Exprs = code[:len(code)-1]
+		m.CodeSec.Codes[i].Size = size
 	}
 
 	return nil
@@ -695,15 +689,15 @@ func readSectionData(m *Module, r io.Reader) error {
 		return err
 	}
 
-	m.Data = &DataSec{}
-	m.Data.DataEntries = make([]Data, dataCount)
+	m.DataSec = &DataSec{}
+	m.DataSec.DataSegments = make([]Data, dataCount)
 	for i := uint32(0); i < dataCount; i++ {
-		m.Data.DataEntries[i].MemIdx, err = leb128.ReadUint32(r)
+		m.DataSec.DataSegments[i].MemIdx, err = leb128.ReadUint32(r)
 		if err != nil {
 			return err
 		}
 
-		m.Data.DataEntries[i].Offset, err = readExprs(r)
+		m.DataSec.DataSegments[i].Offset, err = readExprs(r)
 		if err != nil {
 			return err
 		}
@@ -713,7 +707,7 @@ func readSectionData(m *Module, r io.Reader) error {
 			return err
 		}
 
-		m.Data.DataEntries[i].Init, err = ReadBytes(r, byteCount)
+		m.DataSec.DataSegments[i].Init, err = ReadBytes(r, byteCount)
 	}
 	return nil
 }
@@ -777,7 +771,7 @@ func readGlobalType(r io.Reader) (GlobalType, error) {
 		return globalType, err
 	}
 
-	globalType.Mut, err = readMut(r)
+	globalType.Mutability, err = readMut(r)
 	if err != nil {
 		return globalType, err
 	}
@@ -785,8 +779,8 @@ func readGlobalType(r io.Reader) (GlobalType, error) {
 	return globalType, nil
 }
 
-func readMut(r io.Reader) (Mut, error) {
-	var res Mut
+func readMut(r io.Reader) (Mutability, error) {
+	var res Mutability
 	b, err := ReadByte(r)
 	if err != nil {
 		return res, err
@@ -795,7 +789,7 @@ func readMut(r io.Reader) (Mut, error) {
 		return res, errors.New("wasm: invalid mutability flag")
 	}
 
-	res = Mut(b)
+	res = Mutability(b)
 	return res, nil
 }
 
@@ -828,13 +822,13 @@ func readName(r io.Reader) (string, error) {
 	return string(bytes), nil
 }
 
-func readLocals(r io.Reader) ([]LocalEntry, error) {
+func readLocals(r io.Reader) ([]Local, error) {
 	localCount, err := leb128.ReadUint32(r)
 	if err != nil {
-		return []LocalEntry{}, err
+		return []Local{}, err
 	}
 
-	locals := make([]LocalEntry, localCount)
+	locals := make([]Local, localCount)
 	for i := uint32(0); i < localCount; i++ {
 		locals[i].Count, err = leb128.ReadUint32(r)
 		if err != nil {
