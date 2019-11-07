@@ -141,7 +141,8 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
-func (vm *VM) burnGas(cost int64) {
+// BurnGas for burning gas internal vm and external call
+func (vm *VM) BurnGas(cost int64) {
 	if vm.gasLimit > 0 {
 		// log.Printf("Gas limit: %d, used: %d", vm.gasLimit, vm.gasUsed)
 		remainingGas := vm.gasLimit - vm.gasUsed
@@ -154,7 +155,7 @@ func (vm *VM) burnGas(cost int64) {
 }
 
 func (vm *VM) burnGasForOp(op opcode.Opcode) {
-	vm.burnGas(vm.gasPolicy.GetCost(op))
+	vm.BurnGas(vm.gasPolicy.GetCost(op))
 }
 
 func (vm *VM) interpret() uint64 {
