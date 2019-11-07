@@ -1,14 +1,11 @@
 package wasm
 
 import (
-	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"unicode/utf8"
-
-	"github.com/vertexdlt/vertexvm/leb128"
 )
 
 // Magic represent Wasm 4-byte magic number (the string ‘\0asm’)
@@ -181,7 +178,7 @@ type TableSec struct {
 	Tables []Table
 }
 
-// MemorySec represent the Memory Section
+// MemSec represent the Memory Section
 // https://webassembly.github.io/spec/core/binary/modules.html#memory-section
 type MemSec struct {
 	Mems []Mem
@@ -223,21 +220,23 @@ type DataSec struct {
 }
 
 // ReadModule read a module from Reader r and return a constructed Module
-func ReadModule(r io.Reader) (*Module, error) {
+func ReadModule(wasmBytes []byte) (*Module, error) {
+	wr := &wasmReader{wasmBytes, 0}
 	m := &Module{}
-	err := readMagic(r)
+
+	err := readMagic(wr)
 	if err != nil {
 		return nil, err
 	}
 
-	m.Version, err = readVersion(r)
+	err = readVersion(m, wr)
 	if err != nil {
 		return nil, err
 	}
 
 	var lastID *byte
 	for {
-		lastID, err = readSection(m, r, lastID)
+		lastID, err = readSection(m, wr, lastID)
 
 		if err != nil {
 			if err != io.EOF {
@@ -265,32 +264,35 @@ func ReadModule(r io.Reader) (*Module, error) {
 	}
 }
 
-func readMagic(r io.Reader) error {
-	var magic, err = readU32(r)
+func readMagic(wr *wasmReader) (err error) {
+	b, err := wr.Read(4)
 	if err != nil {
 		return err
 	}
+
+	magic := binary.LittleEndian.Uint32(b)
 	if magic != Magic {
 		return errors.New("wasm: invalid magic number")
+	}
+	return nil
+}
+
+func readVersion(m *Module, wr *wasmReader) (err error) {
+	b, err := wr.Read(4)
+	if err != nil {
+		return err
+	}
+
+	m.Version = binary.LittleEndian.Uint32(b)
+	if m.Version != Version {
+		return errors.New("wasm: invalid version number")
 	}
 
 	return nil
 }
 
-func readVersion(r io.Reader) (uint32, error) {
-	var version, err = readU32(r)
-	if err != nil {
-		return 0, err
-	}
-	if version != Version {
-		return 0, errors.New("wasm: invalid version number")
-	}
-
-	return version, nil
-}
-
-func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
-	id, err := ReadByte(r)
+func readSection(m *Module, wr *wasmReader, lastID *byte) (*byte, error) {
+	id, err := wr.ReadOne()
 	if err != nil {
 		return nil, err
 	}
@@ -301,20 +303,22 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 		}
 	}
 
-	datalen, err := leb128.ReadUint32(r)
+	datalen, err := wr.readLeb128Uint32()
 	if err != nil {
 		return nil, err
 	}
 
-	sectionReader := io.LimitReader(r, int64(datalen))
-	// buffer, _ := ioutil.ReadAll(sectionReader)
-	// sectionReader = bytes.NewBuffer(buffer)
+	b, err := wr.Read(datalen)
+	if err != nil {
+		return nil, err
+	}
+	sectionReader := &wasmReader{b, 0}
 	// fmt.Println(id)
+	// fmt.Printf("%s", hex.Dump(sectionReader.b))
 
 	switch id {
 	case 0:
 		// Skip custom section
-		io.CopyN(ioutil.Discard, sectionReader, int64(datalen))
 	case 1:
 		err := readSectionType(m, sectionReader)
 		if err != nil {
@@ -374,13 +378,11 @@ func readSection(m *Module, r io.Reader, lastID *byte) (*byte, error) {
 		return nil, fmt.Errorf("wasm: read section error - unknown section id %d", id)
 	}
 
-	// Read any remaining byte from sectionReader
-	_, err = ioutil.ReadAll(sectionReader)
 	return &id, err
 }
 
-func readSectionType(m *Module, r io.Reader) error {
-	vectorLen, err := leb128.ReadUint32(r)
+func readSectionType(m *Module, wr *wasmReader) error {
+	vectorLen, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -388,7 +390,7 @@ func readSectionType(m *Module, r io.Reader) error {
 	m.TypeSec = &TypeSec{}
 	m.TypeSec.FuncTypes = make([]FuncType, vectorLen)
 	for i := uint32(0); i < vectorLen; i++ {
-		funcTypeForm, err := ReadByte(r)
+		funcTypeForm, err := wr.ReadOne()
 		if err != nil {
 			return err
 		}
@@ -396,27 +398,27 @@ func readSectionType(m *Module, r io.Reader) error {
 			return errors.New("wasm: invalid functype signature byte")
 		}
 
-		paramTypesCount, err := leb128.ReadUint32(r)
+		paramTypesCount, err := wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
 		m.TypeSec.FuncTypes[i].ParamTypes = make([]ValueType, paramTypesCount)
 		for j := uint32(0); j < paramTypesCount; j++ {
-			m.TypeSec.FuncTypes[i].ParamTypes[j], err = readValueType(r)
+			m.TypeSec.FuncTypes[i].ParamTypes[j], err = readValueType(wr)
 			if err != nil {
 				return err
 			}
 		}
 
-		returnTypesCount, err := leb128.ReadUint32(r)
+		returnTypesCount, err := wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
 		m.TypeSec.FuncTypes[i].ReturnTypes = make([]ValueType, returnTypesCount)
 		for j := uint32(0); j < returnTypesCount; j++ {
-			m.TypeSec.FuncTypes[i].ReturnTypes[j], err = readValueType(r)
+			m.TypeSec.FuncTypes[i].ReturnTypes[j], err = readValueType(wr)
 			if err != nil {
 				return err
 			}
@@ -426,8 +428,8 @@ func readSectionType(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionImport(m *Module, r io.Reader) error {
-	importCount, err := leb128.ReadUint32(r)
+func readSectionImport(m *Module, wr *wasmReader) error {
+	importCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -435,17 +437,17 @@ func readSectionImport(m *Module, r io.Reader) error {
 	m.ImportSec = &ImportSec{}
 	m.ImportSec.Imports = make([]Import, importCount)
 	for i := uint32(0); i < importCount; i++ {
-		m.ImportSec.Imports[i].ModuleName, err = readName(r)
+		m.ImportSec.Imports[i].ModuleName, err = readName(wr)
 		if err != nil {
 			return err
 		}
 
-		m.ImportSec.Imports[i].FieldName, err = readName(r)
+		m.ImportSec.Imports[i].FieldName, err = readName(wr)
 		if err != nil {
 			return err
 		}
 
-		kind, err := ReadByte(r)
+		kind, err := wr.ReadOne()
 		if err != nil {
 			return err
 		}
@@ -453,29 +455,29 @@ func readSectionImport(m *Module, r io.Reader) error {
 		var importDesc ImportDesc
 		switch kind {
 		case ExternalFunction:
-			importDesc.TypeIdx, err = leb128.ReadUint32(r)
+			importDesc.TypeIdx, err = wr.readLeb128Uint32()
 			if err != nil {
 				return err
 			}
 		case ExternalTable:
 			importDesc.Table = &Table{}
-			importDesc.Table.ElemType, err = readElemType(r)
+			importDesc.Table.ElemType, err = readElemType(wr)
 			if err != nil {
 				return err
 			}
 
-			importDesc.Table.Limits, err = readLimits(r)
+			importDesc.Table.Limits, err = readLimits(wr)
 			if err != nil {
 				return err
 			}
 		case ExternalMemory:
 			importDesc.Mem = &Mem{}
-			importDesc.Mem.Limits, err = readLimits(r)
+			importDesc.Mem.Limits, err = readLimits(wr)
 			if err != nil {
 				return err
 			}
 		case ExternalGlobalType:
-			globalType, err := readGlobalType(r)
+			globalType, err := readGlobalType(wr)
 			if err != nil {
 				return err
 			}
@@ -490,8 +492,8 @@ func readSectionImport(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionFunction(m *Module, r io.Reader) error {
-	typeIdxCount, err := leb128.ReadUint32(r)
+func readSectionFunction(m *Module, wr *wasmReader) error {
+	typeIdxCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -499,7 +501,7 @@ func readSectionFunction(m *Module, r io.Reader) error {
 	m.FuncSec = &FuncSec{}
 	m.FuncSec.TypeIndices = make([]uint32, typeIdxCount)
 	for i := uint32(0); i < typeIdxCount; i++ {
-		m.FuncSec.TypeIndices[i], err = leb128.ReadUint32(r)
+		m.FuncSec.TypeIndices[i], err = wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
@@ -507,8 +509,8 @@ func readSectionFunction(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionTable(m *Module, r io.Reader) error {
-	tableCount, err := leb128.ReadUint32(r)
+func readSectionTable(m *Module, wr *wasmReader) error {
+	tableCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -516,12 +518,12 @@ func readSectionTable(m *Module, r io.Reader) error {
 	m.TableSec = &TableSec{}
 	m.TableSec.Tables = make([]Table, tableCount)
 	for i := uint32(0); i < tableCount; i++ {
-		m.TableSec.Tables[i].ElemType, err = readElemType(r)
+		m.TableSec.Tables[i].ElemType, err = readElemType(wr)
 		if err != nil {
 			return err
 		}
 
-		m.TableSec.Tables[i].Limits, err = readLimits(r)
+		m.TableSec.Tables[i].Limits, err = readLimits(wr)
 		if err != nil {
 			return err
 		}
@@ -530,8 +532,8 @@ func readSectionTable(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionMemory(m *Module, r io.Reader) error {
-	memCount, err := leb128.ReadUint32(r)
+func readSectionMemory(m *Module, wr *wasmReader) error {
+	memCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -539,7 +541,7 @@ func readSectionMemory(m *Module, r io.Reader) error {
 	m.MemSec = &MemSec{}
 	m.MemSec.Mems = make([]Mem, memCount)
 	for i := uint32(0); i < memCount; i++ {
-		m.MemSec.Mems[i].Limits, err = readLimits(r)
+		m.MemSec.Mems[i].Limits, err = readLimits(wr)
 		if err != nil {
 			return err
 		}
@@ -548,8 +550,8 @@ func readSectionMemory(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionGlobal(m *Module, r io.Reader) error {
-	globalCount, err := leb128.ReadUint32(r)
+func readSectionGlobal(m *Module, wr *wasmReader) error {
+	globalCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -557,12 +559,12 @@ func readSectionGlobal(m *Module, r io.Reader) error {
 	m.GlobalSec = &GlobalSec{}
 	m.GlobalSec.Globals = make([]Global, globalCount)
 	for i := uint32(0); i < globalCount; i++ {
-		m.GlobalSec.Globals[i].Type, err = readGlobalType(r)
+		m.GlobalSec.Globals[i].Type, err = readGlobalType(wr)
 		if err != nil {
 			return err
 		}
 
-		m.GlobalSec.Globals[i].Init, err = readExprs(r)
+		m.GlobalSec.Globals[i].Init, err = readExprs(wr)
 		if err != nil {
 			return err
 		}
@@ -571,8 +573,8 @@ func readSectionGlobal(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionExport(m *Module, r io.Reader) error {
-	exportCount, err := leb128.ReadUint32(r)
+func readSectionExport(m *Module, wr *wasmReader) error {
+	exportCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -581,12 +583,12 @@ func readSectionExport(m *Module, r io.Reader) error {
 	m.ExportSec.ExportMap = make(map[string]Export, exportCount)
 	for i := uint32(0); i < exportCount; i++ {
 		var export Export
-		export.Name, err = readName(r)
+		export.Name, err = readName(wr)
 		if err != nil {
 			return err
 		}
 
-		b, err := ReadByte(r)
+		b, err := wr.ReadOne()
 		if err != nil {
 			return err
 		}
@@ -595,7 +597,7 @@ func readSectionExport(m *Module, r io.Reader) error {
 		}
 
 		export.Desc.Kind = b
-		export.Desc.Idx, err = leb128.ReadUint32(r)
+		export.Desc.Idx, err = wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
@@ -606,15 +608,15 @@ func readSectionExport(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionStart(m *Module, r io.Reader) error {
+func readSectionStart(m *Module, wr *wasmReader) error {
 	var err error
 	m.StartSec = &StartSec{}
-	m.StartSec.FuncIdx, err = leb128.ReadUint32(r)
+	m.StartSec.FuncIdx, err = wr.readLeb128Uint32()
 	return err
 }
 
-func readSectionElement(m *Module, r io.Reader) error {
-	elementCount, err := leb128.ReadUint32(r)
+func readSectionElement(m *Module, wr *wasmReader) error {
+	elementCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -622,24 +624,24 @@ func readSectionElement(m *Module, r io.Reader) error {
 	m.ElementSec = &ElementSec{}
 	m.ElementSec.Elements = make([]Element, elementCount)
 	for i := uint32(0); i < elementCount; i++ {
-		m.ElementSec.Elements[i].TableIdx, err = leb128.ReadUint32(r)
+		m.ElementSec.Elements[i].TableIdx, err = wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
-		m.ElementSec.Elements[i].Init, err = readExprs(r)
+		m.ElementSec.Elements[i].Init, err = readExprs(wr)
 		if err != nil {
 			return err
 		}
 
-		funcIdxCount, err := leb128.ReadUint32(r)
+		funcIdxCount, err := wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
 		funcIdxes := make([]uint32, funcIdxCount)
 		for j := uint32(0); j < funcIdxCount; j++ {
-			funcIdxes[j], err = leb128.ReadUint32(r)
+			funcIdxes[j], err = wr.readLeb128Uint32()
 			if err != nil {
 				return err
 			}
@@ -650,8 +652,8 @@ func readSectionElement(m *Module, r io.Reader) error {
 	return nil
 }
 
-func readSectionCode(m *Module, r io.Reader) error {
-	codeCount, err := leb128.ReadUint32(r)
+func readSectionCode(m *Module, wr *wasmReader) error {
+	codeCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -659,32 +661,32 @@ func readSectionCode(m *Module, r io.Reader) error {
 	m.CodeSec = &CodeSec{}
 	m.CodeSec.Codes = make([]Code, codeCount)
 	for i := uint32(0); i < codeCount; i++ {
-		size, err := leb128.ReadUint32(r)
+		size, err := wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
-		codeBody, err := ReadBytes(r, size)
+		codeBody, err := wr.Read(size)
 		if err != nil {
 			return err
 		}
 
-		bytesReader := bytes.NewBuffer(codeBody)
-		m.CodeSec.Codes[i].Locals, err = readLocals(bytesReader)
+		code := &wasmReader{codeBody, 0}
+		m.CodeSec.Codes[i].Locals, err = readLocals(code)
 		if err != nil {
 			return err
 		}
 
-		code := bytesReader.Bytes()
-		m.CodeSec.Codes[i].Exprs = code[:len(code)-1]
+		exprs := code.copyAll()
+		m.CodeSec.Codes[i].Exprs = exprs[:len(exprs)-1]
 		m.CodeSec.Codes[i].Size = size
 	}
 
 	return nil
 }
 
-func readSectionData(m *Module, r io.Reader) error {
-	dataCount, err := leb128.ReadUint32(r)
+func readSectionData(m *Module, wr *wasmReader) error {
+	dataCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return err
 	}
@@ -692,29 +694,29 @@ func readSectionData(m *Module, r io.Reader) error {
 	m.DataSec = &DataSec{}
 	m.DataSec.DataSegments = make([]Data, dataCount)
 	for i := uint32(0); i < dataCount; i++ {
-		m.DataSec.DataSegments[i].MemIdx, err = leb128.ReadUint32(r)
+		m.DataSec.DataSegments[i].MemIdx, err = wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
-		m.DataSec.DataSegments[i].Offset, err = readExprs(r)
+		m.DataSec.DataSegments[i].Offset, err = readExprs(wr)
 		if err != nil {
 			return err
 		}
 
-		byteCount, err := leb128.ReadUint32(r)
+		byteCount, err := wr.readLeb128Uint32()
 		if err != nil {
 			return err
 		}
 
-		m.DataSec.DataSegments[i].Init, err = ReadBytes(r, byteCount)
+		m.DataSec.DataSegments[i].Init, err = wr.Read(byteCount)
 	}
 	return nil
 }
 
-func readElemType(r io.Reader) (byte, error) {
+func readElemType(wr *wasmReader) (byte, error) {
 	var elemType byte
-	elemType, err := ReadByte(r)
+	elemType, err := wr.ReadOne()
 	if err != nil {
 		return elemType, err
 	}
@@ -728,28 +730,28 @@ func readElemType(r io.Reader) (byte, error) {
 	return elemType, nil
 }
 
-func readLimits(r io.Reader) (Limits, error) {
+func readLimits(wr *wasmReader) (Limits, error) {
 	var (
 		limits Limits
 		err    error
 	)
-	limits.Flag, err = ReadByte(r)
+	limits.Flag, err = wr.ReadOne()
 	if err != nil {
 		return limits, err
 	}
 
 	switch limits.Flag {
 	case 0x00:
-		limits.Min, err = leb128.ReadUint32(r)
+		limits.Min, err = wr.readLeb128Uint32()
 		if err != nil {
 			return limits, err
 		}
 	case 0x01:
-		limits.Min, err = leb128.ReadUint32(r)
+		limits.Min, err = wr.readLeb128Uint32()
 		if err != nil {
 			return limits, err
 		}
-		limits.Max, err = leb128.ReadUint32(r)
+		limits.Max, err = wr.readLeb128Uint32()
 		if err != nil {
 			return limits, err
 		}
@@ -760,18 +762,18 @@ func readLimits(r io.Reader) (Limits, error) {
 	return limits, nil
 }
 
-func readGlobalType(r io.Reader) (GlobalType, error) {
+func readGlobalType(wr *wasmReader) (GlobalType, error) {
 	var (
 		globalType GlobalType
 		err        error
 	)
 
-	globalType.ValueType, err = readValueType(r)
+	globalType.ValueType, err = readValueType(wr)
 	if err != nil {
 		return globalType, err
 	}
 
-	globalType.Mutability, err = readMut(r)
+	globalType.Mutability, err = readMut(wr)
 	if err != nil {
 		return globalType, err
 	}
@@ -779,9 +781,9 @@ func readGlobalType(r io.Reader) (GlobalType, error) {
 	return globalType, nil
 }
 
-func readMut(r io.Reader) (Mutability, error) {
+func readMut(wr *wasmReader) (Mutability, error) {
 	var res Mutability
-	b, err := ReadByte(r)
+	b, err := wr.ReadOne()
 	if err != nil {
 		return res, err
 	}
@@ -793,9 +795,9 @@ func readMut(r io.Reader) (Mutability, error) {
 	return res, nil
 }
 
-func readValueType(r io.Reader) (ValueType, error) {
+func readValueType(wr *wasmReader) (ValueType, error) {
 	var res ValueType
-	b, err := ReadByte(r)
+	b, err := wr.ReadOne()
 	if err != nil {
 		return res, err
 	}
@@ -806,13 +808,13 @@ func readValueType(r io.Reader) (ValueType, error) {
 	return res, nil
 }
 
-func readName(r io.Reader) (string, error) {
-	byteLen, err := leb128.ReadUint32(r)
+func readName(wr *wasmReader) (string, error) {
+	byteLen, err := wr.readLeb128Uint32()
 	if err != nil {
 		return "", err
 	}
 
-	bytes, err := ReadBytes(r, byteLen)
+	bytes, err := wr.Read(byteLen)
 	if err != nil {
 		return "", err
 	}
@@ -822,20 +824,20 @@ func readName(r io.Reader) (string, error) {
 	return string(bytes), nil
 }
 
-func readLocals(r io.Reader) ([]Local, error) {
-	localCount, err := leb128.ReadUint32(r)
+func readLocals(wr *wasmReader) ([]Local, error) {
+	localCount, err := wr.readLeb128Uint32()
 	if err != nil {
 		return []Local{}, err
 	}
 
 	locals := make([]Local, localCount)
 	for i := uint32(0); i < localCount; i++ {
-		locals[i].Count, err = leb128.ReadUint32(r)
+		locals[i].Count, err = wr.readLeb128Uint32()
 		if err != nil {
 			return locals, err
 		}
 
-		locals[i].ValueType, err = readValueType(r)
+		locals[i].ValueType, err = readValueType(wr)
 		if err != nil {
 			return locals, err
 		}
@@ -844,14 +846,14 @@ func readLocals(r io.Reader) ([]Local, error) {
 	return locals, nil
 }
 
-func readExprs(r io.Reader) ([]byte, error) {
+func readExprs(wr *wasmReader) ([]byte, error) {
 	var (
 		opcode byte
 		exprs  []byte
 		err    error
 	)
 	for opcode != 0x0B {
-		opcode, err = ReadByte(r)
+		opcode, err = wr.ReadOne()
 		if err != nil {
 			return exprs, err
 		}

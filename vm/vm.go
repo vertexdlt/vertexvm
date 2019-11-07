@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"log"
 	"math"
@@ -68,8 +67,7 @@ type VM struct {
 
 // NewVM initializes a new VM
 func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
-	reader := bytes.NewReader(code)
-	m, err := wasm.ReadModule(reader)
+	m, err := wasm.ReadModule(code)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +107,10 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		}
 	}
 	vm.functionImports = functionImports
-	vm.initGlobals()
+	err = vm.initGlobals()
+	if err != nil {
+		return nil, err
+	}
 	if m.StartSec != nil { // called after module loading
 		vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
 	}

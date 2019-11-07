@@ -22,7 +22,7 @@ func main() {
 	}
 	fmt.Println(machine.Module.FunctionIndexSpace)
 	for i, fn := range machine.Module.FunctionIndexSpace {
-		fmt.Println("func", i, fn.Body.Exprs)
+		fmt.Println("func", i, fn.Code.Exprs)
 	}
 	fmt.Println(machine.Invoke(fnIndex))
 }

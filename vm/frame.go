@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"log"
 
@@ -30,11 +29,11 @@ func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 
 func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	ins := frame.instructions()
-	r := bytes.NewReader(ins[frame.ip+1:])
-	bitcnt, result, err := leb128.Read(r, maxbit, hasSign)
+	bitcnt, result, err := leb128.Read(ins[frame.ip+1:len(ins)], maxbit, hasSign)
 	if err != nil {
 		log.Fatal(err)
 	}
+
 	frame.ip += int(bitcnt)
 	return result
 }

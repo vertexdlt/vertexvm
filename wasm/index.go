@@ -1,7 +1,7 @@
 package wasm
 
 import (
-	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -52,14 +52,14 @@ type Module struct {
 func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 	var stack []uint64
 	var lastVal ValueType
-	r := bytes.NewReader(expr)
+	wr := &wasmReader{expr, 0}
 
-	if r.Len() == 0 {
+	if len(expr) == 0 {
 		return nil, errors.New("ErrEmptyInitExpr")
 	}
 
 	for {
-		b, err := r.ReadByte()
+		b, err := wr.ReadOne()
 		if err == io.EOF {
 			break
 		} else if err != nil {
@@ -67,38 +67,43 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 		}
 		switch b {
 		case i32Const:
-			i, err := leb128.ReadInt32(r)
+			bitcnt, i, err := leb128.ReadInt32(wr.copyAll())
 			if err != nil {
 				return nil, err
 			}
+			wr.curPos += bitcnt
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI32
 		case i64Const:
-			i, err := leb128.ReadInt64(r)
+			bitcnt, i, err := leb128.ReadInt64(wr.copyAll())
 			if err != nil {
 				return nil, err
 			}
+			wr.curPos += bitcnt
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI64
 		case f32Const:
-			i, err := readU32(r)
+			b, err := wr.Read(4)
 			if err != nil {
 				return nil, err
 			}
+			i := binary.LittleEndian.Uint32(b)
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF32
 		case f64Const:
-			i, err := readU64(r)
+			b, err := wr.Read(8)
 			if err != nil {
 				return nil, err
 			}
-			stack = append(stack, i)
+			i := binary.LittleEndian.Uint64(b)
+			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF64
 		case getGlobal:
-			index, err := leb128.ReadUint32(r)
+			bitcnt, index, err := leb128.ReadUint32(wr.copyAll())
 			if err != nil {
 				return nil, err
 			}
+			wr.curPos += bitcnt
 			globalVar := m.GetGlobal(int(index))
 			if globalVar == nil {
 				return nil, errors.New("InvalidGlobalIndexError")
@@ -238,6 +243,7 @@ func (m *Module) populateLinearMemory() error {
 		}
 
 		val, err := m.ExecInitExpr(entry.Offset)
+
 		if err != nil {
 			return err
 		}
