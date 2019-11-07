@@ -64,11 +64,13 @@ type VM struct {
 	memory          []byte
 	functionImports []FunctionImport
 	importResolver  ImportResolver
-	gas             *Gas
+	gasPolicy       GasPolicy
+	gasUsed         int64
+	gasLimit        int64
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, gas *Gas, importResolver ImportResolver) (_retVM *VM, retErr error) {
+func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver ImportResolver) (_retVM *VM, retErr error) {
 	reader := bytes.NewReader(code)
 	m, err := wasm.ReadModule(reader, nil)
 	if err != nil {
@@ -87,7 +89,9 @@ func NewVM(code []byte, gas *Gas, importResolver ImportResolver) (_retVM *VM, re
 		breakDepth:     -1,
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
-		gas:            gas,
+		gasPolicy:      gasPolicy,
+		gasUsed:        0,
+		gasLimit:       gasLimit,
 	}
 	if m.Memory != nil && len(m.Memory.Entries) != 0 {
 		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
@@ -137,20 +141,20 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
-func (vm *VM) burnGas(cost uint64) {
-	if vm.gas != nil {
-		log.Printf("Gas limit: %d, used: %d", vm.gas.limit, vm.gas.used)
-		remainingGas := vm.gas.limit - vm.gas.used
+func (vm *VM) burnGas(cost int64) {
+	if vm.gasLimit > 0 {
+		// log.Printf("Gas limit: %d, used: %d", vm.gasLimit, vm.gasUsed)
+		remainingGas := vm.gasLimit - vm.gasUsed
 		if remainingGas < cost {
 			panic("out out gas")
 		} else {
-			vm.gas.used = vm.gas.used + cost
+			vm.gasUsed = vm.gasUsed + cost
 		}
 	}
 }
 
 func (vm *VM) burnGasForOp(op opcode.Opcode) {
-	vm.burnGas(GetGasCost(op))
+	vm.burnGas(vm.gasPolicy.GetCost(op))
 }
 
 func (vm *VM) interpret() uint64 {
@@ -1174,4 +1178,9 @@ func (vm *VM) GetMemory() []byte {
 
 func (vm *VM) ExtendMemory(n int) {
 	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+}
+
+// GetGasUsed exposes the amount of gas burnt for execution
+func (vm *VM) GetGasUsed() int64 {
+	return vm.gasUsed
 }

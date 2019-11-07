@@ -50,7 +50,7 @@ type vmTest struct {
 	entry    string
 }
 
-func getVM(name string, gas *Gas) *VM {
+func getVM(name string, gasPolicy GasPolicy, gasLimit int64) *VM {
 	wat := fmt.Sprintf("./test_data/%s.wat", name)
 	wasm := fmt.Sprintf("./test_data/%s.wasm", name)
 	cmd := exec.Command("wat2wasm", wat, "-o", wasm)
@@ -66,7 +66,7 @@ func getVM(name string, gas *Gas) *VM {
 	if err != nil {
 		panic(err)
 	}
-	vm, err := NewVM(data, gas, &TestResolver{})
+	vm, err := NewVM(data, gasPolicy, gasLimit, &TestResolver{})
 	if err != nil {
 		panic(err)
 	}
@@ -74,7 +74,7 @@ func getVM(name string, gas *Gas) *VM {
 }
 
 func TestNeg(t *testing.T) {
-	vm := getVM("i32", nil)
+	vm := getVM("i32", &SimpleGasPolicy{}, -1)
 	_, ok := vm.GetFunctionIndex("somefunc")
 	if ok {
 		t.Errorf("Expect function index to be -1")
@@ -155,7 +155,7 @@ func TestVM(t *testing.T) {
 		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
 	}
 	for _, test := range tests {
-		vm := getVM(test.name, nil)
+		vm := getVM(test.name, &SimpleGasPolicy{}, -1)
 		fmt.Println(vm.Module.TableIndexSpace[0])
 
 		fnID, ok := vm.GetFunctionIndex(test.entry)
@@ -287,7 +287,7 @@ func TestWasmSuite(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				vm, err = NewVM(data, nil, &TestResolver{})
+				vm, err = NewVM(data, &SimpleGasPolicy{}, -1, &TestResolver{})
 				if err != nil {
 					t.Error(err)
 				}
@@ -379,8 +379,7 @@ func TestWasmSuite(t *testing.T) {
 }
 
 func TestEnoughGas(t *testing.T) {
-	gas := Gas{limit: 100, used: 0}
-	vm := getVM("i32", &gas)
+	vm := getVM("i32", &SimpleGasPolicy{}, 100)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")
@@ -389,8 +388,7 @@ func TestEnoughGas(t *testing.T) {
 }
 
 func TestOutOfGas(t *testing.T) {
-	gas := Gas{limit: 100, used: 0}
-	vm := getVM("i32", &gas)
+	vm := getVM("i32", &SimpleGasPolicy{}, 10)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")
