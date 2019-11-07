@@ -155,7 +155,7 @@ func (vm *VM) BurnGas(cost int64) {
 }
 
 func (vm *VM) burnGasForOp(op opcode.Opcode) {
-	vm.BurnGas(vm.gasPolicy.GetCost(op))
+	vm.BurnGas(vm.gasPolicy.GetCostForOp(op))
 }
 
 func (vm *VM) interpret() uint64 {
