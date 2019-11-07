@@ -175,11 +175,11 @@ func (vm *VM) interpret() uint64 {
 		frame := vm.currentFrame()
 		frame.ip++
 		op := opcode.Opcode(frame.instructions()[frame.ip])
-		vm.burnGasForOp(op)
 		// fmt.Printf("op %d 0x%x\n", op, op)
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
+		vm.burnGasForOp(op)
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
