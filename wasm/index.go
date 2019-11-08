@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-
-	"github.com/vertexdlt/vertexvm/leb128"
 )
 
 const (
@@ -67,19 +65,17 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 		}
 		switch b {
 		case i32Const:
-			bitcnt, i, err := leb128.ReadInt32(wr.copyAll())
+			i, err := wr.readLeb128Int32()
 			if err != nil {
 				return nil, err
 			}
-			wr.curPos += bitcnt
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI32
 		case i64Const:
-			bitcnt, i, err := leb128.ReadInt64(wr.copyAll())
+			i, err := wr.readLeb128Int64()
 			if err != nil {
 				return nil, err
 			}
-			wr.curPos += bitcnt
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI64
 		case f32Const:
@@ -99,11 +95,10 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF64
 		case getGlobal:
-			bitcnt, index, err := leb128.ReadUint32(wr.copyAll())
+			index, err := wr.readLeb128Uint32()
 			if err != nil {
 				return nil, err
 			}
-			wr.curPos += bitcnt
 			globalVar := m.GetGlobal(int(index))
 			if globalVar == nil {
 				return nil, errors.New("InvalidGlobalIndexError")
