@@ -13,7 +13,7 @@ func Read(b []byte, n uint32, hasSign bool) (uint32, int64, error) {
 	}
 	var (
 		shift  uint32
-		bitcnt uint32
+		bytecnt uint32
 		cur    int64
 		result int64
 		sign   int64 = -1
@@ -23,44 +23,44 @@ func Read(b []byte, n uint32, hasSign bool) (uint32, int64, error) {
 		result |= (cur & 0x7f) << shift
 		shift += 7
 		sign <<= 7
-		bitcnt++
+		bytecnt++
 		if cur&0x80 == 0 {
 			break
 		}
-		if bitcnt > (n+7-1)/7 {
+		if bytecnt > (n+7-1)/7 {
 			log.Fatal("Unsigned LEB at byte overflow")
 		}
 	}
 	if hasSign && ((sign>>1)&result) != 0 {
 		result |= sign
 	}
-	return bitcnt, result, nil
+	return bytecnt, result, nil
 }
 
 // ReadUint32 reads a LEB128 encoded unsigned 32-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadUint32(b []byte) (uint32, uint32, error) {
-	bitcnt, result, err := Read(b, 32, false)
-	return bitcnt, uint32(result), err
+	bytecnt, result, err := Read(b, 32, false)
+	return bytecnt, uint32(result), err
 }
 
 // ReadInt32 reads a LEB128 encoded signed 32-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadInt32(b []byte) (uint32, int32, error) {
-	bitcnt, result, err := Read(b, 32, true)
-	return bitcnt, int32(result), err
+	bytecnt, result, err := Read(b, 32, true)
+	return bytecnt, int32(result), err
 }
 
 // ReadUint64 reads a LEB128 encoded unsigned 64-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadUint64(b []byte) (uint32, uint64, error) {
-	bitcnt, result, err := Read(b, 64, false)
-	return bitcnt, uint64(result), err
+	bytecnt, result, err := Read(b, 64, false)
+	return bytecnt, uint64(result), err
 }
 
 // ReadInt64 reads a LEB128 encoded signed 64-bit integer from r, and
 // returns the integer value, and the error (if any).
 func ReadInt64(b []byte) (uint32, int64, error) {
-	bitcnt, result, err := Read(b, 64, true)
-	return bitcnt, result, err
+	bytecnt, result, err := Read(b, 64, true)
+	return bytecnt, result, err
 }
