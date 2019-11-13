@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"math"
+
+	"github.com/vertexdlt/vertexvm/leb128"
+	"github.com/vertexdlt/vertexvm/util"
 )
 
 const (
@@ -50,7 +53,7 @@ type Module struct {
 func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 	var stack []uint64
 	var lastVal ValueType
-	wr := &wasmReader{expr, 0}
+	wr := util.NewByteReader(expr)
 
 	if len(expr) == 0 {
 		return nil, errors.New("ErrEmptyInitExpr")
@@ -65,14 +68,14 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 		}
 		switch b {
 		case i32Const:
-			i, err := wr.readLeb128Int32()
+			i, err := leb128.ReadInt32(wr)
 			if err != nil {
 				return nil, err
 			}
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeI32
 		case i64Const:
-			i, err := wr.readLeb128Int64()
+			i, err := leb128.ReadInt64(wr)
 			if err != nil {
 				return nil, err
 			}
@@ -95,7 +98,7 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 			stack = append(stack, uint64(i))
 			lastVal = ValueTypeF64
 		case getGlobal:
-			index, err := wr.readLeb128Uint32()
+			index, err := leb128.ReadUint32(wr)
 			if err != nil {
 				return nil, err
 			}
