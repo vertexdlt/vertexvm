@@ -126,7 +126,7 @@ func (m *Module) ExecInitExpr(expr []byte) (interface{}, error) {
 	case ValueTypeF64:
 		return math.Float64frombits(uint64(v)), nil
 	default:
-		panic(fmt.Sprintf("Invalid value type produced by initializer expression: %d", int8(lastVal)))
+		return nil, fmt.Errorf("Invalid value type produced by initializer expression: %d", int8(lastVal))
 	}
 }
 
