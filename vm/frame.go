@@ -2,7 +2,6 @@ package vm
 
 import (
 	"encoding/binary"
-	"log"
 
 	"github.com/vertexdlt/vertexvm/leb128"
 	"github.com/vertexdlt/vertexvm/wasm"
@@ -31,9 +30,8 @@ func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	ins := frame.instructions()
 	bytecnt, result, err := leb128.Read(ins[frame.ip+1:len(ins)], maxbit, hasSign)
 	if err != nil {
-		log.Fatal(err)
+		panic(NewExecError(err.Error()))
 	}
-
 	frame.ip += int(bytecnt)
 	return result
 }
