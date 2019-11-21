@@ -4,7 +4,8 @@ import (
 	"encoding/binary"
 	"log"
 
-	"github.com/go-interpreter/wagon/wasm"
+	"github.com/vertexdlt/vertexvm/leb128"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // Frame or call frame holds the relevant execution information of a function
@@ -28,35 +29,17 @@ func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 
 func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	ins := frame.instructions()
-	var (
-		shift  uint32
-		bitcnt uint32
-		cur    int64
-		result int64
-		sign   int64 = -1
-	)
-	for i := frame.ip + 1; i < len(ins); i++ {
-		cur = int64(ins[i])
-		result |= (cur & 0x7f) << shift
-		shift += 7
-		sign <<= 7
-		bitcnt++
-		if cur&0x80 == 0 {
-			break
-		}
-		if bitcnt > (maxbit+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
-		}
+	bytecnt, result, err := leb128.Read(ins[frame.ip+1:len(ins)], maxbit, hasSign)
+	if err != nil {
+		log.Fatal(err)
 	}
-	if hasSign && ((sign>>1)&result) != 0 {
-		result |= sign
-	}
-	frame.ip += int(bitcnt)
+
+	frame.ip += int(bytecnt)
 	return result
 }
 
 func (frame *Frame) instructions() []byte {
-	return frame.fn.Body.Code
+	return frame.fn.Code.Exprs
 }
 
 func (frame *Frame) hasEnded() bool {

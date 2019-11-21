@@ -1,8 +1,8 @@
 package vm
 
 import (
-	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // BlockType type of a wasm block
