@@ -12,7 +12,7 @@ func castReturnValue(retVal uint64, retType wasm.ValueType) uint64 {
 	case wasm.ValueTypeI64, wasm.ValueTypeF64:
 		castVal = retVal
 	default:
-		panic("unknown return type")
+		panic(ErrUnknownReturnType)
 	}
 	return castVal
 }

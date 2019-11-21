@@ -2,7 +2,6 @@ package vm
 
 import (
 	"encoding/binary"
-	"log"
 
 	"github.com/go-interpreter/wagon/wasm"
 )
@@ -45,7 +44,7 @@ func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 			break
 		}
 		if bitcnt > (maxbit+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
+			panic(ErrLebOverflow)
 		}
 	}
 	if hasSign && ((sign>>1)&result) != 0 {

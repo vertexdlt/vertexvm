@@ -44,6 +44,6 @@ func getBlockType(op opcode.Opcode) BlockType {
 	case opcode.If:
 		return typeIf
 	default:
-		panic("invalid opcode")
+		panic(ErrInvalidBlockType)
 	}
 }
