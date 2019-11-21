@@ -26,7 +26,7 @@ func (wr *wasmReader) ReadOne() (b byte, err error) {
 		return b, io.EOF
 	}
 
-	b = wr.b[wr.curPos : wr.curPos+2][0]
+	b = wr.b[wr.curPos]
 	wr.curPos = wr.curPos + 1
 	return b, nil
 }

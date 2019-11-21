@@ -2,21 +2,20 @@ package leb128
 
 import (
 	"errors"
-	"log"
 )
 
 // Read reads an unsigned integer of size n defined in https://webassembly.github.io/spec/core/binary/values.html#binary-int
 // Read panics if n>64.
-func Read(b []byte, n uint32, hasSign bool) (uint32, int64, error) {
-	if n > 64 {
-		panic(errors.New("leb128: n must <= 64"))
+func Read(b []byte, maxbit uint32, hasSign bool) (uint32, int64, error) {
+	if maxbit > 64 {
+		return 0, 0, errors.New("leb128: n must <= 64")
 	}
 	var (
-		shift  uint32
+		shift   uint32
 		bytecnt uint32
-		cur    int64
-		result int64
-		sign   int64 = -1
+		cur     int64
+		result  int64
+		sign    int64 = -1
 	)
 	for i := 0; i < len(b); i++ {
 		cur = int64(b[i])
@@ -27,8 +26,8 @@ func Read(b []byte, n uint32, hasSign bool) (uint32, int64, error) {
 		if cur&0x80 == 0 {
 			break
 		}
-		if bytecnt > (n+7-1)/7 {
-			log.Fatal("Unsigned LEB at byte overflow")
+		if bytecnt > (maxbit+7-1)/7 {
+			return 0, 0, errors.New("Unsigned LEB at byte overflow")
 		}
 	}
 	if hasSign && ((sign>>1)&result) != 0 {
