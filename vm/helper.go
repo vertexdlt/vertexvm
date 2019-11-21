@@ -1,7 +1,7 @@
 package vm
 
 import (
-	"github.com/go-interpreter/wagon/wasm"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 func castReturnValue(retVal uint64, retType wasm.ValueType) uint64 {

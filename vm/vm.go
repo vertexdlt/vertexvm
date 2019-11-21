@@ -1,14 +1,13 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/binary"
 	"log"
 	"math"
 	"math/bits"
 
-	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // StackSize is the VM stack depth
@@ -46,7 +45,7 @@ type ImportResolver interface {
 type FunctionImport struct {
 	module    string
 	name      string
-	signature *wasm.FunctionSig
+	signature *wasm.FuncType
 	function  *HostFunction
 }
 
@@ -68,8 +67,7 @@ type VM struct {
 
 // NewVM initializes a new VM
 func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
-	reader := bytes.NewReader(code)
-	m, err := wasm.ReadModule(reader, nil)
+	m, err := wasm.ReadModule(code)
 	if err != nil {
 		return nil, err
 	}
@@ -87,24 +85,24 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
 	}
-	if m.Memory != nil && len(m.Memory.Entries) != 0 {
-		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
+	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
+		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
 
 	functionImports := make([]FunctionImport, 0)
-	if m.Import != nil {
-		for _, entry := range m.Import.Entries {
-			switch entry.Type.Kind() {
+	if m.ImportSec != nil {
+		for _, entry := range m.ImportSec.Imports {
+			switch entry.ImportDesc.Kind {
 			case wasm.ExternalFunction:
-				typeIndex := entry.Type.(wasm.FuncImport).Type
+				typeIndex := entry.ImportDesc.TypeIdx
 				functionImports = append(functionImports, FunctionImport{
 					module:    entry.ModuleName,
 					name:      entry.FieldName,
-					signature: &m.Types.Entries[typeIndex],
+					signature: &m.TypeSec.FuncTypes[typeIndex],
 				})
 			default:
-				log.Printf("Import type %v not supported\n", entry.Type.Kind())
+				log.Printf("Import type %v not supported\n", entry.ImportDesc.Kind)
 			}
 		}
 	}
@@ -112,8 +110,8 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 	if err := vm.initGlobals(); err != nil {
 		return nil, err
 	}
-	if m.Start != nil { // called after module loading
-		vm.Invoke(uint64(m.Start.Index)) // start does not take args or return
+	if m.StartSec != nil { // called after module loading
+		vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
 	}
 	return vm, nil
 }
@@ -142,9 +140,9 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if vm.Module.Export != nil {
-		if entry, ok := vm.Module.Export.Entries[name]; ok {
-			return uint64(entry.Index), ok
+	if vm.Module.ExportSec != nil {
+		if entry, ok := vm.Module.ExportSec.ExportMap[name]; ok {
+			return uint64(entry.Desc.Idx), ok
 		}
 	}
 	return 0, false
@@ -178,11 +176,11 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
 		case op == opcode.Loop:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
 		case op == opcode.If:
@@ -263,7 +261,7 @@ func (vm *VM) interpret() uint64 {
 			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
-			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
+			expectedFuncSig := wasm.FuncType(vm.Module.TypeSec.FuncTypes[sigIndex])
 
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
@@ -362,10 +360,10 @@ func (vm *VM) interpret() uint64 {
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
 			pages := len(vm.memory) / wasmPageSize
 			n := int(vm.pop())
-			limit := vm.Module.Memory.Entries[0].Limits
+			limit := vm.Module.MemSec.Mems[0].Limits
 			maxPages := maxSize / wasmPageSize
-			if limit.Flags == 1 && maxPages > int(limit.Maximum) {
-				maxPages = int(limit.Maximum)
+			if limit.Flag == 1 && maxPages > int(limit.Max) {
+				maxPages = int(limit.Max)
 			}
 			if pages+n >= pages && pages+n <= maxPages {
 				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
@@ -1012,14 +1010,14 @@ func (vm *VM) setupFrame(fidx int) error {
 	if fn == nil {
 		return ErrFuncNotFound
 	}
-	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
+	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
-	for _, entry := range fn.Body.Locals {
+	for _, entry := range fn.Code.Locals {
 		numLocals += int(entry.Count)
 	}
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Sig.ParamTypes) + numLocals
+	vm.sp = frame.basePointer + len(fn.Type.ParamTypes) + numLocals
 	// uninitialize locals
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
@@ -1083,9 +1081,9 @@ func (vm *VM) popFrame() *Frame {
 	if vm.framesIndex == 0 {
 		panic(ErrFrameUnderflow)
 	}
-	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
+	hasReturn := len(vm.currentFrame().fn.Type.ReturnTypes) != 0
 	if hasReturn {
-		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Sig.ReturnTypes[0])
+		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Type.ReturnTypes[0])
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 		vm.push(retVal)
@@ -1134,8 +1132,8 @@ func (vm *VM) initGlobals() error {
 	return nil
 }
 
-func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
-	signature := vm.GetFunction(fidx).Sig
+func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
+	signature := vm.GetFunction(fidx).Type
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
 		panic(ErrMismatchedFuncSig)
