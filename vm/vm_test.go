@@ -90,10 +90,10 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "env":
 		switch name {
 		case "add":
-			return func(vm *VM, args ...uint64) uint64 {
+			return func(vm *VM, args ...uint64) (uint64, error) {
 				x := int(args[0])
 				y := int(args[1])
-				return uint64(x + y)
+				return uint64(x + y), nil
 			}
 		default:
 			log.Fatalf("Unknown import name: %s", name)
@@ -101,28 +101,28 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "spectest":
 		switch name {
 		case "print", "print_i32", "print_i32_f32", "print_f32", "print_f64", "print_f64_f64":
-			return func(vm *VM, args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 0, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "test":
 		switch name {
 		case "func-i64->i64":
-			return func(vm *VM, args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 0, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mf":
 		switch name {
 		case "call":
-			return func(vm *VM, args ...uint64) uint64 { return 2 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 2, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mt":
 		switch name {
 		case "call", "h":
-			return func(vm *VM, args ...uint64) uint64 { return 4 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 4, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
@@ -164,7 +164,7 @@ func TestVM(t *testing.T) {
 		if !ok {
 			t.Error("cannot get function export")
 		}
-		ret := vm.Invoke(fnID, test.params...)
+		ret, _ := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
 			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
 		}
@@ -311,7 +311,7 @@ func TestWasmSuite(t *testing.T) {
 					}
 					// t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
 					// t.Log(args)
-					ret := vm.Invoke(funcID, args...)
+					ret, _ := vm.Invoke(funcID, args...)
 					// t.Log("ret", ret)
 
 					if len(cmd.Expected) != 0 {
