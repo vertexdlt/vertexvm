@@ -1,0 +1,18 @@
+language: go
+
+env: GO111MODULE=on
+
+go:
+  - 1.12.x
+  - 1.11.x
+
+before_install:
+  - go get github.com/mattn/goveralls
+
+before_script:
+  - bash ./travis-before-script.sh
+
+script:
+  - $GOPATH/bin/goveralls -service=travis-ci
+  - golangci-lint run ./...
+  - go test ./...
