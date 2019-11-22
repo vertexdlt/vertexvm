@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/binary"
+	"io"
 	"log"
 	"math"
 	"math/bits"
@@ -1173,10 +1174,29 @@ func (vm *VM) CallFunction(fidx int) error {
 	}
 }
 
-func (vm *VM) GetMemory() []byte {
-	return vm.memory
+// MemSize gets the current vm memory size
+func (vm *VM) MemSize() int {
+	return len(vm.memory)
 }
 
-func (vm *VM) ExtendMemory(n int) {
-	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+// MemWrite write a byte buffer to vm memory at a specific offset
+func (vm *VM) MemWrite(b []byte, offset int) (int, error) {
+	var err error
+	if offset+len(b) > vm.MemSize() {
+		b = b[:vm.MemSize()-offset]
+		err = io.ErrShortWrite
+	}
+	copy(vm.memory[offset:], b)
+	return len(b), err
+}
+
+// MemRead copy a vm memory segment to a given placeholder
+func (vm *VM) MemRead(b []byte, offset int) (int, error) {
+	var err error
+	if offset+len(b) > vm.MemSize() {
+		b = b[:vm.MemSize()-offset]
+		err = io.ErrShortBuffer
+	}
+	copy(b, vm.memory[offset:offset+len(b)])
+	return len(b), err
 }
