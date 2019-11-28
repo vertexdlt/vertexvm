@@ -28,7 +28,7 @@ func NewFrame(fn *wasm.Function, basePointer int, baseBlockIndex int) *Frame {
 
 func (frame *Frame) readLEB(maxbit uint32, hasSign bool) int64 {
 	ins := frame.instructions()
-	bytecnt, result, err := leb128.Read(ins[frame.ip+1:len(ins)], maxbit, hasSign)
+	bytecnt, result, err := leb128.Read(ins[frame.ip+1:], maxbit, hasSign)
 	if err != nil {
 		panic(NewExecError(err.Error()))
 	}
