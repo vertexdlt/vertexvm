@@ -139,7 +139,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 	if err := vm.CallFunction(int(fidx)); err != nil {
 		return 0, err
 	}
-	return vm.interpret(), nil
+	return vm.interpret()
 }
 
 // GetFunctionIndex look up a function export index by its name
@@ -152,14 +152,14 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
-func (vm *VM) interpret() uint64 {
+func (vm *VM) interpret() (uint64, error) {
 	for {
 		for {
 			if vm.framesIndex == 0 {
 				if vm.sp > 0 {
-					return vm.pop()
+					return vm.pop(), nil
 				}
-				return 0
+				return 0, nil
 			}
 			if vm.currentFrame().hasEnded() {
 				vm.popFrame()
@@ -262,9 +262,8 @@ func (vm *VM) interpret() uint64 {
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
 			fidx := int(frame.readLEB(32, false))
-			err := vm.CallFunction(fidx)
-			if err != nil {
-				panic(err)
+			if err := vm.CallFunction(fidx); err != nil {
+				return 0, err
 			}
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
@@ -276,9 +275,8 @@ func (vm *VM) interpret() uint64 {
 				panic(ErrOutOfBoundTableAccess)
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			err := vm.CallFunction(fidx)
-			if err != nil {
-				panic(err)
+			if err := vm.CallFunction(fidx); err != nil {
+				return 0, err
 			}
 			if fidx >= len(vm.functionImports) {
 				vm.assertFuncSig(fidx, &expectedFuncSig)
