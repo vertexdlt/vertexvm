@@ -338,7 +338,10 @@ func TestEnoughGas(t *testing.T) {
 	if !ok {
 		panic("Cannot get export fn index")
 	}
-	vm.Invoke(fnIndex)
+	_, err := vm.Invoke(fnIndex)
+	if err != nil {
+		t.Errorf("Expect execution to go through, got %v", err)
+	}
 }
 
 func TestOutOfGas(t *testing.T) {
@@ -347,12 +350,10 @@ func TestOutOfGas(t *testing.T) {
 	if !ok {
 		panic("Cannot get export fn index")
 	}
-	defer func() {
-		if r := recover(); r == nil {
-			t.Errorf("The code did not panic")
-		}
-	}()
-	vm.Invoke(fnIndex)
+	_, err := vm.Invoke(fnIndex)
+	if err != ErrOutOfGas {
+		t.Errorf("Expect execution to be out of gas, got %v", err)
+	}
 }
 
 func TestMemSize(t *testing.T) {

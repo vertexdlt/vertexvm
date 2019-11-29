@@ -159,20 +159,20 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 }
 
 // BurnGas for burning gas internal vm and external call
-func (vm *VM) BurnGas(cost int64) {
+func (vm *VM) BurnGas(cost int64) error {
 	if vm.gasLimit > 0 {
 		// log.Printf("Gas limit: %d, used: %d", vm.gasLimit, vm.gasUsed)
 		remainingGas := vm.gasLimit - vm.gasUsed
 		if remainingGas < cost {
-			panic("out out gas")
-		} else {
-			vm.gasUsed = vm.gasUsed + cost
+			return ErrOutOfGas
 		}
+		vm.gasUsed = vm.gasUsed + cost
 	}
+	return nil
 }
 
-func (vm *VM) burnGasForOp(op opcode.Opcode) {
-	vm.BurnGas(vm.gasPolicy.GetCostForOp(op))
+func (vm *VM) burnGasForOp(op opcode.Opcode) error {
+	return vm.BurnGas(vm.gasPolicy.GetCostForOp(op))
 }
 
 func (vm *VM) interpret() (uint64, error) {
@@ -197,7 +197,9 @@ func (vm *VM) interpret() (uint64, error) {
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
 		}
-		vm.burnGasForOp(op)
+		if err := vm.burnGasForOp(op); err != nil {
+			return 0, err
+		}
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
