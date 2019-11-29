@@ -1,18 +1,18 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/binary"
+	"io"
 	"log"
 	"math"
 	"math/bits"
 
-	"github.com/go-interpreter/wagon/wasm"
 	"github.com/vertexdlt/vertexvm/opcode"
+	"github.com/vertexdlt/vertexvm/wasm"
 )
 
 // StackSize is the VM stack depth
-const StackSize = 1024 * 8
+const StackSize = 64 * 1024
 
 // MaxFrames is the maximum active frames supported
 const MaxFrames = 1024
@@ -35,7 +35,7 @@ const f32CanoncialNaNBits = uint64(0x7fc00000)
 const f64CanonicalNaNBits = uint64(0x7ff8000000000000)
 
 // HostFunction defines imported functions defined in host
-type HostFunction func(vm *VM, args ...uint64) uint64
+type HostFunction func(vm *VM, args ...uint64) (uint64, error)
 
 // ImportResolver looks up the host imports
 type ImportResolver interface {
@@ -46,7 +46,7 @@ type ImportResolver interface {
 type FunctionImport struct {
 	module    string
 	name      string
-	signature *wasm.FunctionSig
+	signature *wasm.FuncType
 	function  *HostFunction
 }
 
@@ -70,9 +70,8 @@ type VM struct {
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver ImportResolver) (_retVM *VM, retErr error) {
-	reader := bytes.NewReader(code)
-	m, err := wasm.ReadModule(reader, nil)
+func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver ImportResolver) (*VM, error) {
+	m, err := wasm.ReadModule(code)
 	if err != nil {
 		return nil, err
 	}
@@ -93,49 +92,64 @@ func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver Impo
 		gasUsed:        0,
 		gasLimit:       gasLimit,
 	}
-	if m.Memory != nil && len(m.Memory.Entries) != 0 {
-		vm.memory = make([]byte, uint(m.Memory.Entries[0].Limits.Initial)*wasmPageSize)
+	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
+		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 	}
 
 	functionImports := make([]FunctionImport, 0)
-	if m.Import != nil {
-		for _, entry := range m.Import.Entries {
-			switch entry.Type.Kind() {
+	if m.ImportSec != nil {
+		for _, entry := range m.ImportSec.Imports {
+			switch entry.ImportDesc.Kind {
 			case wasm.ExternalFunction:
-				typeIndex := entry.Type.(wasm.FuncImport).Type
+				typeIndex := entry.ImportDesc.TypeIdx
 				functionImports = append(functionImports, FunctionImport{
 					module:    entry.ModuleName,
 					name:      entry.FieldName,
-					signature: &m.Types.Entries[typeIndex],
+					signature: &m.TypeSec.FuncTypes[typeIndex],
 				})
 			default:
-				log.Println("Import not supported")
+				log.Printf("Import type %v not supported\n", entry.ImportDesc.Kind)
 			}
 		}
 	}
 	vm.functionImports = functionImports
-	vm.initGlobals()
-	if m.Start != nil { // called after module loading
-		vm.Invoke(uint64(m.Start.Index)) // start does not take args or return
+	if err := vm.initGlobals(); err != nil {
+		return nil, err
+	}
+	if m.StartSec != nil { // called after module loading
+		vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
 	}
 	return vm, nil
 }
 
 // Invoke triggers a WASM function
-func (vm *VM) Invoke(fidx uint64, args ...uint64) uint64 {
+func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			switch r.(type) {
+			case ExecError:
+				ret, err = 0, r.(error)
+			default:
+				panic(r)
+			}
+		}
+	}()
+
 	for _, arg := range args {
 		vm.push(arg)
 	}
-	vm.CallFunction(int(fidx))
-	return vm.interpret()
+	if err := vm.CallFunction(int(fidx)); err != nil {
+		return 0, err
+	}
+	return vm.interpret(), nil
 }
 
 // GetFunctionIndex look up a function export index by its name
 func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
-	if vm.Module.Export != nil {
-		if entry, ok := vm.Module.Export.Entries[name]; ok {
-			return uint64(entry.Index), ok
+	if vm.Module.ExportSec != nil {
+		if entry, ok := vm.Module.ExportSec.ExportMap[name]; ok {
+			return uint64(entry.Desc.Idx), ok
 		}
 	}
 	return 0, false
@@ -187,11 +201,11 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeBlock, returnType, vm.sp)
 			vm.pushBlock(block)
 		case op == opcode.Loop:
-			returnType := wasm.ValueType(frame.readLEB(32, true))
+			returnType := wasm.ValueType(frame.readLEB(32, false))
 			block := NewBlock(frame.ip, typeLoop, returnType, vm.sp)
 			vm.pushBlock(block)
 		case op == opcode.If:
@@ -206,13 +220,13 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.Else:
 			block := vm.blocks[vm.blocksIndex-1]
 			if block.blockType != typeIf {
-				log.Fatal("No matching If for Else block")
+				panic(ErrNoMatchingIfBlock)
 			}
 			if block.executeElse { // infers vm.operative() == true enterring if
 				// if jump 0 so needs to reset in order to resume execution
 				vm.breakDepth--
 				if vm.breakDepth < -1 {
-					panic("Invalid break recover")
+					panic(ErrInvalidBreak)
 				}
 			} else {
 				if vm.operative() {
@@ -233,7 +247,7 @@ func (vm *VM) interpret() uint64 {
 			if !vm.operative() {
 				vm.breakDepth--
 				if vm.breakDepth < -1 {
-					panic("Invalid break recover")
+					panic(ErrInvalidBreak)
 				}
 			}
 		case op == opcode.Br:
@@ -252,7 +266,7 @@ func (vm *VM) interpret() uint64 {
 			targetCount := int(frame.readLEB(32, false))
 			targetDepth := -1
 			if targetCount > MaxBrTableSize {
-				panic("Too many br_table targets")
+				panic(ErrTooManyBrTableTarget)
 			}
 			for i := 0; i < targetCount+1; i++ { // +1 for default target
 				depth := int(frame.readLEB(32, false))
@@ -272,12 +286,12 @@ func (vm *VM) interpret() uint64 {
 			vm.CallFunction(fidx)
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
-			expectedFuncSig := wasm.FunctionSig(vm.Module.Types.Entries[sigIndex])
+			expectedFuncSig := wasm.FuncType(vm.Module.TypeSec.FuncTypes[sigIndex])
 
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
 			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) {
-				log.Fatal("Out of bound table access")
+				panic(ErrOutOfBoundTableAccess)
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
 			vm.CallFunction(fidx)
@@ -371,10 +385,10 @@ func (vm *VM) interpret() uint64 {
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#memory-related-operators-described-here
 			pages := len(vm.memory) / wasmPageSize
 			n := int(vm.pop())
-			limit := vm.Module.Memory.Entries[0].Limits
+			limit := vm.Module.MemSec.Mems[0].Limits
 			maxPages := maxSize / wasmPageSize
-			if limit.Flags == 1 && maxPages > int(limit.Maximum) {
-				maxPages = int(limit.Maximum)
+			if limit.Flag == 1 && maxPages > int(limit.Max) {
+				maxPages = int(limit.Max)
 			}
 			if pages+n >= pages && pages+n <= maxPages {
 				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
@@ -382,8 +396,6 @@ func (vm *VM) interpret() uint64 {
 				pages = -1
 			}
 			vm.push(uint64(uint32(pages)))
-		case op == opcode.F64ReinterpretI64:
-			vm.push(math.Float64bits(math.Float64frombits(vm.pop())))
 		// I32 Ops
 		case op == opcode.I32Const:
 			val := frame.readLEB(32, true)
@@ -473,25 +485,25 @@ func (vm *VM) interpret() uint64 {
 				c = a * b
 			case opcode.I32DivS:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				if a == math.MaxInt32+1 && b == math.MaxInt32 {
-					panic("signed integer overflow")
+					panic(ErrIntegerOverflow)
 				}
 				c = uint32(int32(a) / int32(b))
 			case opcode.I32DivU:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = a / b
 			case opcode.I32RemS:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = uint32(int32(a) % int32(b))
 			case opcode.I32RemU:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = a % b
 			case opcode.I32And:
@@ -602,25 +614,25 @@ func (vm *VM) interpret() uint64 {
 				c = a * b
 			case opcode.I64DivS:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				if a == math.MaxInt64+1 && b == math.MaxInt64 {
-					panic("signed integer overflow")
+					panic(ErrIntegerOverflow)
 				}
 				c = uint64(int64(a) / int64(b))
 			case opcode.I64DivU:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = a / b
 			case opcode.I64RemS:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = uint64(int64(a) % int64(b))
 			case opcode.I64RemU:
 				if b == 0 {
-					panic("integer division by zero")
+					panic(ErrIntegerDivisionByZero)
 				}
 				c = a % b
 			case opcode.I64And:
@@ -847,34 +859,34 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.I32TruncSF32:
 			f := math.Float32frombits(uint32(vm.pop()))
 			if math.IsNaN(float64(f)) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f < math.MinInt32 || f > math.MaxInt32 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(uint32(int32(f))))
 		case op == opcode.I32TruncUF32:
 			i := uint32(vm.pop())
 			f := math.Float32frombits(i)
 			if math.IsNaN(float64(f)) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f > math.MaxUint32 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(uint32(f)))
 		case op == opcode.I32TruncSF64:
 			f := math.Float64frombits(vm.pop())
 			if math.IsNaN(f) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f < math.MinInt32 || f > math.MaxInt32 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(uint32(int32(f))))
 		case op == opcode.I32TruncUF64:
 			f := math.Float64frombits(vm.pop())
 			if math.IsNaN(f) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f > math.MaxUint32 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(uint32(f)))
 		case op == opcode.I64ExtendSI32:
@@ -884,33 +896,33 @@ func (vm *VM) interpret() uint64 {
 		case op == opcode.I64TruncSF32:
 			f := math.Float32frombits(uint32(vm.pop()))
 			if math.IsNaN(float64(f)) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f < math.MinInt64 || f > math.MaxInt64 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(int64(f)))
 		case op == opcode.I64TruncUF32:
 			f := math.Float32frombits(uint32(vm.pop()))
 			if math.IsNaN(float64(f)) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f > math.MaxUint64 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(f))
 		case op == opcode.I64TruncSF64:
 			f := math.Float64frombits(vm.pop())
 			if math.IsNaN(f) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f < math.MinInt64 || f > math.MaxInt64 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(int64(f)))
 		case op == opcode.I64TruncUF64:
 			f := math.Float64frombits(vm.pop())
 			if math.IsNaN(f) {
-				panic("invalid conversion to integer")
+				panic(ErrInvalidIntConversion)
 			} else if f > math.MaxUint64 {
-				panic("integer overflow")
+				panic(ErrIntegerOverflow)
 			}
 			vm.push(uint64(f))
 		case op == opcode.F32ConvertSI32:
@@ -949,9 +961,8 @@ func (vm *VM) interpret() uint64 {
 
 		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
 			// Do nothing
-
 		default:
-			log.Printf("unknown opcode 0x%x\n", op)
+			panic(ErrUnknownOpcode)
 		}
 	}
 }
@@ -1002,10 +1013,10 @@ func (vm *VM) operative() bool {
 
 func (vm *VM) blockJump(breakDepth int) {
 	if breakDepth < 0 {
-		panic("Invalid break depth")
+		panic(ErrInvalidBreakDepth)
 	}
 	if vm.blocksIndex-breakDepth < vm.currentFrame().baseBlockIndex {
-		panic("cannot break out of current function")
+		panic(ErrInvalidFunctionBreak)
 	} else if vm.blocksIndex-breakDepth == vm.currentFrame().baseBlockIndex {
 		vm.breakDepth = breakDepth
 		return
@@ -1019,21 +1030,25 @@ func (vm *VM) blockJump(breakDepth int) {
 	}
 }
 
-func (vm *VM) setupFrame(fidx int) {
+func (vm *VM) setupFrame(fidx int) error {
 	fn := vm.GetFunction(fidx)
-	frame := NewFrame(fn, vm.sp-len(fn.Sig.ParamTypes), vm.blocksIndex)
+	if fn == nil {
+		return ErrFuncNotFound
+	}
+	frame := NewFrame(fn, vm.sp-len(fn.Type.ParamTypes), vm.blocksIndex)
 	vm.pushFrame(frame)
 	numLocals := 0
-	for _, entry := range fn.Body.Locals {
+	for _, entry := range fn.Code.Locals {
 		numLocals += int(entry.Count)
 	}
 	// leave some space for locals
-	vm.sp = frame.basePointer + len(fn.Sig.ParamTypes) + numLocals
+	vm.sp = frame.basePointer + len(fn.Type.ParamTypes) + numLocals
 	// uninitialize locals
 	for i := vm.sp - 1; i >= vm.sp-numLocals; i-- {
 		vm.stack[i] = 0
 	}
 	// fmt.Println("Instructions", frame.instructions())
+	return nil
 }
 
 func (vm *VM) currentFrame() *Frame {
@@ -1042,7 +1057,7 @@ func (vm *VM) currentFrame() *Frame {
 
 func (vm *VM) push(val uint64) {
 	if vm.sp == StackSize {
-		panic("Stack overflow")
+		panic(ErrStackOverflow)
 	}
 	vm.stack[vm.sp] = val
 	vm.sp++
@@ -1065,26 +1080,35 @@ func (vm *VM) pushFloat64(val float64) {
 }
 
 func (vm *VM) pop() uint64 {
+	if vm.sp == 0 {
+		panic(ErrStackUnderflow)
+	}
 	vm.sp--
 	return vm.stack[vm.sp]
 }
 
 func (vm *VM) peek() uint64 {
+	if vm.sp == 0 {
+		panic(ErrStackUnderflow)
+	}
 	return vm.stack[vm.sp-1]
 }
 
 func (vm *VM) pushFrame(frame *Frame) {
 	if vm.framesIndex == MaxFrames {
-		panic("Frames overflow")
+		panic(ErrFrameOverflow)
 	}
 	vm.frames[vm.framesIndex] = frame
 	vm.framesIndex++
 }
 
 func (vm *VM) popFrame() *Frame {
-	hasReturn := len(vm.currentFrame().fn.Sig.ReturnTypes) != 0
+	if vm.framesIndex == 0 {
+		panic(ErrFrameUnderflow)
+	}
+	hasReturn := len(vm.currentFrame().fn.Type.ReturnTypes) != 0
 	if hasReturn {
-		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Sig.ReturnTypes[0])
+		retVal := castReturnValue(vm.peek(), vm.currentFrame().fn.Type.ReturnTypes[0])
 		vm.sp = vm.currentFrame().basePointer
 		vm.blocksIndex = vm.currentFrame().baseBlockIndex
 		vm.push(retVal)
@@ -1099,7 +1123,7 @@ func (vm *VM) popFrame() *Frame {
 
 func (vm *VM) pushBlock(block *Block) {
 	if vm.blocksIndex == MaxBlocks {
-		panic("Blocks overflow")
+		panic(ErrBlockOverflow)
 	}
 	vm.blocks[vm.blocksIndex] = block
 	vm.blocksIndex++
@@ -1108,7 +1132,7 @@ func (vm *VM) pushBlock(block *Block) {
 func (vm *VM) popBlock() *Block {
 	vm.blocksIndex--
 	if vm.blocksIndex < vm.currentFrame().baseBlockIndex {
-		panic("cannot find matching block opening")
+		panic(ErrBlockUnderflow)
 	}
 	return vm.blocks[vm.blocksIndex]
 }
@@ -1133,20 +1157,20 @@ func (vm *VM) initGlobals() error {
 	return nil
 }
 
-func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FunctionSig) {
-	signature := vm.GetFunction(fidx).Sig
+func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
+	signature := vm.GetFunction(fidx).Type
 	if len(signature.ParamTypes) != len(expectedSignature.ParamTypes) ||
 		len(signature.ReturnTypes) != len(expectedSignature.ReturnTypes) {
-		panic("Mismatch function signature")
+		panic(ErrMismatchedFuncSig)
 	}
 	for i, paramType := range signature.ParamTypes {
 		if paramType != expectedSignature.ParamTypes[i] {
-			panic("Mismatch function signature")
+			panic(ErrMismatchedFuncSig)
 		}
 	}
 	for i, returnType := range signature.ReturnTypes {
 		if returnType != expectedSignature.ReturnTypes[i] {
-			panic("Mismatch function signature")
+			panic(ErrMismatchedFuncSig)
 		}
 	}
 }
@@ -1157,7 +1181,7 @@ func (vm *VM) GetFunction(fidx int) *wasm.Function {
 }
 
 // CallFunction Either invoke an imported function or align the new frame for the incoming interpretation
-func (vm *VM) CallFunction(fidx int) {
+func (vm *VM) CallFunction(fidx int) error {
 	if fidx < len(vm.functionImports) {
 		fi := vm.functionImports[fidx]
 		hf := vm.importResolver.GetFunction(fi.module, fi.name)
@@ -1166,19 +1190,39 @@ func (vm *VM) CallFunction(fidx int) {
 		for i := argSize - 1; i >= 0; i-- {
 			args[i] = vm.pop()
 		}
-		ret := hf(vm, args...)
+		ret, err := hf(vm, args...)
 		vm.push(ret)
+		return err
 	} else {
-		vm.setupFrame(fidx)
+		return vm.setupFrame(fidx)
 	}
 }
 
-func (vm *VM) GetMemory() []byte {
-	return vm.memory
+// MemSize gets the current vm memory size
+func (vm *VM) MemSize() int {
+	return len(vm.memory)
 }
 
-func (vm *VM) ExtendMemory(n int) {
-	vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+// MemWrite write a byte buffer to vm memory at a specific offset
+func (vm *VM) MemWrite(b []byte, offset int) (int, error) {
+	var err error
+	if offset+len(b) > vm.MemSize() {
+		b = b[:vm.MemSize()-offset]
+		err = io.ErrShortWrite
+	}
+	copy(vm.memory[offset:], b)
+	return len(b), err
+}
+
+// MemRead copy a vm memory segment to a given placeholder
+func (vm *VM) MemRead(b []byte, offset int) (int, error) {
+	var err error
+	if offset+len(b) > vm.MemSize() {
+		b = b[:vm.MemSize()-offset]
+		err = io.ErrShortBuffer
+	}
+	copy(b, vm.memory[offset:offset+len(b)])
+	return len(b), err
 }
 
 // GetGasUsed exposes the amount of gas burnt for execution

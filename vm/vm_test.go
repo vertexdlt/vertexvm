@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -88,10 +90,10 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "env":
 		switch name {
 		case "add":
-			return func(vm *VM, args ...uint64) uint64 {
+			return func(vm *VM, args ...uint64) (uint64, error) {
 				x := int(args[0])
 				y := int(args[1])
-				return uint64(x + y)
+				return uint64(x + y), nil
 			}
 		default:
 			log.Fatalf("Unknown import name: %s", name)
@@ -99,28 +101,28 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 	case "spectest":
 		switch name {
 		case "print", "print_i32", "print_i32_f32", "print_f32", "print_f64", "print_f64_f64":
-			return func(vm *VM, args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 0, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "test":
 		switch name {
 		case "func-i64->i64":
-			return func(vm *VM, args ...uint64) uint64 { return 0 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 0, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mf":
 		switch name {
 		case "call":
-			return func(vm *VM, args ...uint64) uint64 { return 2 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 2, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
 	case "Mt":
 		switch name {
 		case "call", "h":
-			return func(vm *VM, args ...uint64) uint64 { return 4 }
+			return func(vm *VM, args ...uint64) (uint64, error) { return 4, nil }
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
@@ -162,7 +164,7 @@ func TestVM(t *testing.T) {
 		if !ok {
 			t.Error("cannot get function export")
 		}
-		ret := vm.Invoke(fnID, test.params...)
+		ret, _ := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
 			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
 		}
@@ -309,7 +311,7 @@ func TestWasmSuite(t *testing.T) {
 					}
 					// t.Logf("Triggering %s with args at line %d", cmd.Action.Field, cmd.Line)
 					// t.Log(args)
-					ret := vm.Invoke(funcID, args...)
+					ret, _ := vm.Invoke(funcID, args...)
 					// t.Log("ret", ret)
 
 					if len(cmd.Expected) != 0 {
@@ -346,11 +348,11 @@ func TestWasmSuite(t *testing.T) {
 						}
 					}
 				case "get":
-					entry, ok := vm.Module.Export.Entries[cmd.Action.Field]
+					entry, ok := vm.Module.ExportSec.ExportMap[cmd.Action.Field]
 					if !ok {
 						panic("Global export not found")
 					}
-					ret := vm.globals[entry.Index]
+					ret := vm.globals[entry.Desc.Idx]
 					if len(cmd.Expected) != 0 {
 						exp, err := strconv.ParseUint(cmd.Expected[0].Value, 10, 64)
 						if err != nil {
@@ -399,4 +401,73 @@ func TestOutOfGas(t *testing.T) {
 		}
 	}()
 	vm.Invoke(fnIndex)
+}
+
+func TestMemSize(t *testing.T) {
+	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	if len(vm.memory) != vm.MemSize() {
+		t.Errorf("Expect MemSize to be %d, got %d", len(vm.memory), vm.MemSize())
+	}
+}
+
+func TestMemRead(t *testing.T) {
+	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	sample := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	offset := vm.MemSize() - len(sample)
+	copy(vm.memory[offset:offset+len(sample)], sample)
+	readBuffer := make([]byte, 10)
+	readSize, err := vm.MemRead(readBuffer, offset)
+	if readSize != len(sample) {
+		t.Errorf("Expect MemRead result size to be %d, got %d", len(sample), readSize)
+	}
+	if err != nil {
+		t.Errorf("Expect MemRead err to be nil, got %d", err)
+	}
+	if !reflect.DeepEqual(sample, readBuffer) {
+		t.Errorf("Expect MemRead result to be %v, got %v", sample, readBuffer)
+	}
+
+	readBuffer = make([]byte, 15)
+	readSize, err = vm.MemRead(readBuffer, offset)
+	if readSize != len(sample) {
+		t.Errorf("Expect MemRead result size to be %d, got %d", len(sample), readSize)
+	}
+	if err != io.ErrShortBuffer {
+		t.Errorf("Expect MemRead err to be io.ErrShortBuffer, got %v", err)
+	}
+	if !reflect.DeepEqual(sample, readBuffer[:len(sample)]) {
+		t.Errorf("Expect MemRead result first 10 bytes to be %v, got %v", sample, readBuffer)
+	}
+
+}
+
+func TestMemWrite(t *testing.T) {
+	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	sample := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
+	offset := vm.MemSize() - len(sample)
+	writeSize, err := vm.MemWrite(sample, offset)
+
+	if writeSize != len(sample) {
+		t.Errorf("Expect MemWrite result size to be %d, got %d", len(sample), writeSize)
+	}
+	if err != nil {
+		t.Errorf("Expect MemWrite err to be nil, got %d", err)
+	}
+	if !reflect.DeepEqual(sample, vm.memory[offset:offset+len(sample)]) {
+		t.Errorf("Expect MemWrite result to be %v, got %v", sample, vm.memory[offset:offset+len(sample)])
+	}
+
+	sample = []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+
+	writeSize, err = vm.MemWrite(sample, offset)
+
+	if writeSize != vm.MemSize()-offset {
+		t.Errorf("Expect MemWrite result size to be %d, got %d", vm.MemSize()-offset, writeSize)
+	}
+	if err != io.ErrShortWrite {
+		t.Errorf("Expect MemWrite err to be io.ErrShortWrite, got %d", err)
+	}
+	if !reflect.DeepEqual(sample[:writeSize], vm.memory[offset:]) {
+		t.Errorf("Expect MemWrite result to be %v, got %v", sample[:writeSize], vm.memory[offset:])
+	}
 }
