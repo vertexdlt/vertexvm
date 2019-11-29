@@ -710,6 +710,9 @@ func readSectionData(m *Module, wr *wasmReader) error {
 		}
 
 		m.DataSec.DataSegments[i].Init, err = wr.Read(byteCount)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

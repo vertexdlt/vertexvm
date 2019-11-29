@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,9 +10,6 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
-
-	wagonExec "github.com/go-interpreter/wagon/exec"
-	wagon "github.com/go-interpreter/wagon/wasm"
 )
 
 type TestSuite struct {
@@ -167,50 +163,6 @@ func TestVM(t *testing.T) {
 		ret, _ := vm.Invoke(fnID, test.params...)
 		if ret != test.expected {
 			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
-		}
-	}
-}
-
-func TestVM2(t *testing.T) {
-	tests := []vmTest{
-		// {name: "i32", entry: "calc", params: []int64{}, expected: -1},
-		// {name: "local", entry: "calc", params: []int64{2}, expected: 3},
-		// {name: "call", entry: "calc", params: []int64{}, expected: 16},
-		// {name: "select", entry: "calc", params: []int64{5}, expected: 3},
-		// {name: "block", entry: "calc", params: []int64{32}, expected: 16},
-		// {name: "block", entry: "calc", params: []int64{30}, expected: 8},
-		// {name: "loop", entry: "calc", params: []int64{30}, expected: 435},
-		// {name: "ifelse", entry: "calc", params: []int64{1}, expected: 5},
-		// {name: "ifelse", entry: "calc", params: []int64{0}, expected: 7},
-		// {name: "loop", entry: "isPrime", params: []int64{6}, expected: 2},
-		// {name: "loop", entry: "isPrime", params: []int64{9}, expected: 3},
-		{name: "loop", entry: "isPrime", params: []uint64{10007}, expected: 1},
-	}
-	for _, test := range tests {
-		wat := fmt.Sprintf("./test_data/%s.wat", test.name)
-		wasm := fmt.Sprintf("./test_data/%s.wasm", test.name)
-		fmt.Println(test)
-		cmd := exec.Command("wat2wasm", wat, "-o", wasm)
-		err := cmd.Start()
-		if err != nil {
-			panic(err)
-		}
-		err = cmd.Wait()
-		if err != nil {
-			panic(err)
-		}
-
-		data, err := ioutil.ReadFile(wasm)
-		if err != nil {
-			panic(err)
-		}
-		m, err := wagon.ReadModule(bytes.NewReader(data), nil)
-		findex := int64(m.Export.Entries[test.entry].Index)
-		vm, err := wagonExec.NewVM(m)
-		ret, err := vm.ExecCode(findex, uint64(test.params[0]))
-		casted := ret.(uint32)
-		if casted != uint32(test.expected) {
-			t.Errorf("Expect return value to be %d, got %d", test.expected, ret)
 		}
 	}
 }

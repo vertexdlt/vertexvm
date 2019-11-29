@@ -31,7 +31,7 @@ const wasmPageSize = 64 * 1024
 
 const maxSize = math.MaxUint32
 
-const f32CanoncialNaNBits = uint64(0x7fc00000)
+const f32CanonicalNaNBits = uint64(0x7fc00000)
 const f64CanonicalNaNBits = uint64(0x7ff8000000000000)
 
 // HostFunction defines imported functions defined in host
@@ -47,7 +47,7 @@ type FunctionImport struct {
 	module    string
 	name      string
 	signature *wasm.FuncType
-	function  *HostFunction
+	function  *HostFunction //nolint:structcheck,unused
 }
 
 // VM virtual machine
@@ -112,7 +112,10 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		return nil, err
 	}
 	if m.StartSec != nil { // called after module loading
-		vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
+		_, err := vm.Invoke(uint64(m.StartSec.FuncIdx)) // start does not take args or return
+		if err != nil {
+			return nil, err
+		}
 	}
 	return vm, nil
 }
@@ -136,7 +139,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 	if err := vm.CallFunction(int(fidx)); err != nil {
 		return 0, err
 	}
-	return vm.interpret(), nil
+	return vm.interpret()
 }
 
 // GetFunctionIndex look up a function export index by its name
@@ -149,14 +152,14 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
-func (vm *VM) interpret() uint64 {
+func (vm *VM) interpret() (uint64, error) {
 	for {
 		for {
 			if vm.framesIndex == 0 {
 				if vm.sp > 0 {
-					return vm.pop()
+					return vm.pop(), nil
 				}
-				return 0
+				return 0, nil
 			}
 			if vm.currentFrame().hasEnded() {
 				vm.popFrame()
@@ -259,7 +262,9 @@ func (vm *VM) interpret() uint64 {
 			vm.blockJump(vm.blocksIndex - frame.baseBlockIndex)
 		case op == opcode.Call:
 			fidx := int(frame.readLEB(32, false))
-			vm.CallFunction(fidx)
+			if err := vm.CallFunction(fidx); err != nil {
+				return 0, err
+			}
 		case op == opcode.CallIndirect:
 			sigIndex := frame.readLEB(32, false)
 			expectedFuncSig := wasm.FuncType(vm.Module.TypeSec.FuncTypes[sigIndex])
@@ -270,7 +275,9 @@ func (vm *VM) interpret() uint64 {
 				panic(ErrOutOfBoundTableAccess)
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
-			vm.CallFunction(fidx)
+			if err := vm.CallFunction(fidx); err != nil {
+				return 0, err
+			}
 			if fidx >= len(vm.functionImports) {
 				vm.assertFuncSig(fidx, &expectedFuncSig)
 			}
@@ -304,7 +311,7 @@ func (vm *VM) interpret() uint64 {
 			arg := frame.readLEB(32, false)
 			vm.globals[arg] = vm.pop()
 		case opcode.I32Load <= op && op <= opcode.I64Load32U:
-			frame.readLEB(32, false) // alighment
+			frame.readLEB(32, false) // alignment
 			offset := int(frame.readLEB(32, false))
 			address := int(vm.pop())
 			address += offset
@@ -335,7 +342,7 @@ func (vm *VM) interpret() uint64 {
 				vm.push(uint64(v))
 			}
 		case opcode.I32Store <= op && op <= opcode.I64Store32:
-			frame.readLEB(32, false) // alighment
+			frame.readLEB(32, false) // alignment
 			offset := int(frame.readLEB(32, false))
 			v := vm.pop()
 			address := int(vm.pop())
@@ -1041,7 +1048,7 @@ func (vm *VM) push(val uint64) {
 
 func (vm *VM) pushFloat32(val float32) {
 	if math.IsNaN(float64(val)) {
-		vm.push(f32CanoncialNaNBits)
+		vm.push(f32CanonicalNaNBits)
 	} else {
 		vm.push(uint64(math.Float32bits(val)))
 	}
