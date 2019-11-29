@@ -64,10 +64,13 @@ type VM struct {
 	memory          []byte
 	functionImports []FunctionImport
 	importResolver  ImportResolver
+	gasPolicy       GasPolicy
+	gasUsed         int64
+	gasLimit        int64
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error) {
+func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver ImportResolver) (*VM, error) {
 	m, err := wasm.ReadModule(code)
 	if err != nil {
 		return nil, err
@@ -85,6 +88,9 @@ func NewVM(code []byte, importResolver ImportResolver) (_retVM *VM, retErr error
 		breakDepth:     -1,
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
+		gasPolicy:      gasPolicy,
+		gasUsed:        0,
+		gasLimit:       gasLimit,
 	}
 	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
 		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
@@ -152,6 +158,23 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 	return 0, false
 }
 
+// BurnGas for burning gas internal vm and external call
+func (vm *VM) BurnGas(cost int64) error {
+	if vm.gasLimit > 0 {
+		// log.Printf("Gas limit: %d, used: %d", vm.gasLimit, vm.gasUsed)
+		remainingGas := vm.gasLimit - vm.gasUsed
+		if remainingGas < cost {
+			return ErrOutOfGas
+		}
+		vm.gasUsed = vm.gasUsed + cost
+	}
+	return nil
+}
+
+func (vm *VM) burnGasForOp(op opcode.Opcode) error {
+	return vm.BurnGas(vm.gasPolicy.GetCostForOp(op))
+}
+
 func (vm *VM) interpret() (uint64, error) {
 	for {
 		for {
@@ -173,6 +196,9 @@ func (vm *VM) interpret() (uint64, error) {
 		// fmt.Printf("op %d 0x%x\n", op, op)
 		if !vm.operative() && vm.skipInstructions(op) {
 			continue
+		}
+		if err := vm.burnGasForOp(op); err != nil {
+			return 0, err
 		}
 		switch {
 		case op == opcode.Unreachable:
@@ -1206,4 +1232,9 @@ func (vm *VM) MemRead(b []byte, offset int) (int, error) {
 	}
 	copy(b, vm.memory[offset:offset+len(b)])
 	return len(b), err
+}
+
+// GetGasUsed exposes the amount of gas burnt for execution
+func (vm *VM) GetGasUsed() int64 {
+	return vm.gasUsed
 }
