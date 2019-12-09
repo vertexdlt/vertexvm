@@ -75,6 +75,10 @@ func NewVM(code []byte, gasPolicy GasPolicy, gas *Gas, importResolver ImportReso
 		return nil, err
 	}
 
+	if gas.Used > gas.Limit {
+		return nil, ErrOutOfGas
+	}
+
 	vm := &VM{
 		Module:         m,
 		stack:          make([]uint64, StackSize),
