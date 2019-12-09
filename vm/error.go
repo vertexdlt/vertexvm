@@ -37,6 +37,8 @@ var (
 	ErrStackUnderflow = NewExecError("call stack underflow")
 	ErrFrameUnderflow = NewExecError("no frame to pop")
 	ErrBlockUnderflow = NewExecError("cannot find matching block open")
+
+	ErrUnreachable = NewExecError("unreachable")
 )
 
 var (
