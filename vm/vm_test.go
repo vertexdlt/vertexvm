@@ -424,3 +424,15 @@ func TestMemWrite(t *testing.T) {
 		t.Errorf("Expect MemWrite result to be %v, got %v", sample[:writeSize], vm.memory[offset:])
 	}
 }
+
+func TestOutOfGasVMCreation(t *testing.T) {
+	getVM("i32", &FreeGasPolicy{}, 0)
+	data, err := ioutil.ReadFile("./test_data/i32.wasm")
+	if err != nil {
+		panic(err)
+	}
+	_, err = NewVM(data, &FreeGasPolicy{}, &Gas{Limit: 10, Used: 20}, &TestResolver{})
+	if err == nil || err != ErrOutOfGas {
+		t.Errorf("Expect out of gas error: %d", err)
+	}
+}
