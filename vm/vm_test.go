@@ -50,7 +50,7 @@ type vmTest struct {
 	entry         string
 }
 
-func getVM(name string, gasPolicy GasPolicy, gasLimit int64) *VM {
+func getVM(name string, gasPolicy GasPolicy, gasLimit uint64) *VM {
 	wat := fmt.Sprintf("./test_data/%s.wat", name)
 	wasm := fmt.Sprintf("./test_data/%s.wasm", name)
 	cmd := exec.Command("wat2wasm", wat, "-o", wasm)
@@ -66,7 +66,7 @@ func getVM(name string, gasPolicy GasPolicy, gasLimit int64) *VM {
 	if err != nil {
 		panic(err)
 	}
-	vm, err := NewVM(data, gasPolicy, gasLimit, &TestResolver{})
+	vm, err := NewVM(data, gasPolicy, &Gas{Limit: gasLimit}, &TestResolver{})
 	if err != nil {
 		panic(err)
 	}
@@ -74,7 +74,7 @@ func getVM(name string, gasPolicy GasPolicy, gasLimit int64) *VM {
 }
 
 func TestNeg(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	_, ok := vm.GetFunctionIndex("somefunc")
 	if ok {
 		t.Errorf("Expect function index to be -1")
@@ -195,7 +195,7 @@ func TestVM(t *testing.T) {
 		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
 	}
 	for _, test := range tests {
-		vm := getVM(test.name, &SimpleGasPolicy{}, -1)
+		vm := getVM(test.name, &FreeGasPolicy{}, 0)
 		fmt.Println(vm.Module.TableIndexSpace[0])
 
 		fnID, ok := vm.GetFunctionIndex(test.entry)
@@ -283,7 +283,7 @@ func TestWasmSuite(t *testing.T) {
 				if err != nil {
 					t.Error(err)
 				}
-				vm, err = NewVM(data, &SimpleGasPolicy{}, -1, &TestResolver{})
+				vm, err = NewVM(data, &FreeGasPolicy{}, &Gas{}, &TestResolver{})
 				if err != nil {
 					t.Error(err)
 				}
@@ -399,14 +399,14 @@ func TestOutOfGas(t *testing.T) {
 }
 
 func TestMemSize(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	if len(vm.memory) != vm.MemSize() {
 		t.Errorf("Expect MemSize to be %d, got %d", len(vm.memory), vm.MemSize())
 	}
 }
 
 func TestMemRead(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	sample := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	offset := vm.MemSize() - len(sample)
 	copy(vm.memory[offset:offset+len(sample)], sample)
@@ -437,7 +437,7 @@ func TestMemRead(t *testing.T) {
 }
 
 func TestMemWrite(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, -1)
+	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	sample := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
 	offset := vm.MemSize() - len(sample)
 	writeSize, err := vm.MemWrite(sample, offset)
@@ -464,5 +464,17 @@ func TestMemWrite(t *testing.T) {
 	}
 	if !reflect.DeepEqual(sample[:writeSize], vm.memory[offset:]) {
 		t.Errorf("Expect MemWrite result to be %v, got %v", sample[:writeSize], vm.memory[offset:])
+	}
+}
+
+func TestOutOfGasVMCreation(t *testing.T) {
+	getVM("i32", &FreeGasPolicy{}, 0)
+	data, err := ioutil.ReadFile("./test_data/i32.wasm")
+	if err != nil {
+		panic(err)
+	}
+	_, err = NewVM(data, &FreeGasPolicy{}, &Gas{Limit: 10, Used: 20}, &TestResolver{})
+	if err == nil || err != ErrOutOfGas {
+		t.Errorf("Expect out of gas error: %d", err)
 	}
 }
