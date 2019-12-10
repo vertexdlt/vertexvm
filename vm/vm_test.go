@@ -158,7 +158,7 @@ func TestVmError(t *testing.T) {
 			}
 		}()
 
-		vm := getVM(test.name, &SimpleGasPolicy{}, -1)
+		vm := getVM(test.name, &FreeGasPolicy{}, 0)
 		fnID, ok := vm.GetFunctionIndex(test.entry)
 		if !ok {
 			t.Error("cannot get function export")
