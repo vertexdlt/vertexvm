@@ -2,6 +2,7 @@ package vm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -42,10 +43,11 @@ type ValueInfo struct {
 }
 
 type vmTest struct {
-	name     string
-	params   []uint64
-	expected uint64
-	entry    string
+	name          string
+	params        []uint64
+	expected      uint64
+	expectedError string
+	entry         string
 }
 
 func getVM(name string, gasPolicy GasPolicy, gasLimit int64) *VM {
@@ -122,10 +124,50 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 		default:
 			log.Fatalf("Unknown import name: %s", name)
 		}
+	case "wasi_unstable":
+		return func(vm *VM, args ...uint64) (uint64, error) {
+			return 52, nil // __WASI_ENOSYS
+		}
 	default:
 		log.Fatalf("Unknown module name: %s", module)
 	}
 	return nil
+}
+
+func TestVmError(t *testing.T) {
+	tests := []vmTest{
+		{name: "exit", entry: "calc", params: []uint64{}, expectedError: "unreachable"},
+	}
+	for _, test := range tests {
+		defer func() {
+			if r := recover(); r != nil {
+				var err error
+				switch x := r.(type) {
+				case string:
+					err = errors.New(x)
+				case error:
+					err = x
+				default:
+					// Fallback err (per specs, error strings should be lowercase w/o punctuation
+					err = errors.New("unknown panic")
+				}
+
+				if err.Error() != test.expectedError {
+					t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, r)
+				}
+			}
+		}()
+
+		vm := getVM(test.name, &SimpleGasPolicy{}, -1)
+		fnID, ok := vm.GetFunctionIndex(test.entry)
+		if !ok {
+			t.Error("cannot get function export")
+		}
+		_, err := vm.Invoke(fnID, test.params...)
+		if err.Error() != test.expectedError {
+			t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, err.Error())
+		}
+	}
 }
 
 func TestVM(t *testing.T) {
