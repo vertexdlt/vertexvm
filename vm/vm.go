@@ -65,15 +65,18 @@ type VM struct {
 	functionImports []FunctionImport
 	importResolver  ImportResolver
 	gasPolicy       GasPolicy
-	gasUsed         int64
-	gasLimit        int64
+	gas             *Gas
 }
 
 // NewVM initializes a new VM
-func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver ImportResolver) (*VM, error) {
+func NewVM(code []byte, gasPolicy GasPolicy, gas *Gas, importResolver ImportResolver) (*VM, error) {
 	m, err := wasm.ReadModule(code)
 	if err != nil {
 		return nil, err
+	}
+
+	if gas.Used > gas.Limit {
+		return nil, ErrOutOfGas
 	}
 
 	vm := &VM{
@@ -89,8 +92,7 @@ func NewVM(code []byte, gasPolicy GasPolicy, gasLimit int64, importResolver Impo
 		memory:         make([]byte, wasmPageSize),
 		importResolver: importResolver,
 		gasPolicy:      gasPolicy,
-		gasUsed:        0,
-		gasLimit:       gasLimit,
+		gas:            gas,
 	}
 	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
 		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
@@ -159,14 +161,14 @@ func (vm *VM) GetFunctionIndex(name string) (uint64, bool) {
 }
 
 // BurnGas for burning gas internal vm and external call
-func (vm *VM) BurnGas(cost int64) error {
-	if vm.gasLimit > 0 {
+func (vm *VM) BurnGas(cost uint64) error {
+	if cost > 0 {
 		// log.Printf("Gas limit: %d, used: %d", vm.gasLimit, vm.gasUsed)
-		remainingGas := vm.gasLimit - vm.gasUsed
+		remainingGas := vm.gas.Limit - vm.gas.Used
 		if remainingGas < cost {
 			return ErrOutOfGas
 		}
-		vm.gasUsed = vm.gasUsed + cost
+		vm.gas.Used = vm.gas.Used + cost
 	}
 	return nil
 }
@@ -1235,6 +1237,6 @@ func (vm *VM) MemRead(b []byte, offset int) (int, error) {
 }
 
 // GetGasUsed exposes the amount of gas burnt for execution
-func (vm *VM) GetGasUsed() int64 {
-	return vm.gasUsed
+func (vm *VM) GetGasUsed() uint64 {
+	return vm.gas.Used
 }
