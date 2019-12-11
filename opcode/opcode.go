@@ -1,6 +1,6 @@
 package opcode
 
-// Opcode repsensents a WASM
+// Opcode repsensents a WASM opcode.
 type Opcode byte
 
 // Control instructions
@@ -13,7 +13,7 @@ const (
 	Else
 )
 
-// End is the special end WASM
+// End is the special end WASM opcode.
 const (
 	End Opcode = 0x0B
 )
@@ -28,6 +28,7 @@ const (
 	CallIndirect
 )
 
+// Type-parametric instructions.
 const (
 	Drop Opcode = iota + 0x1A
 	Select
@@ -211,6 +212,7 @@ const (
 	F64ReinterpretI64
 )
 
+// MemAccessSize returns opcode memory access size. Non-memory opcodes should return 0
 func (op Opcode) MemAccessSize() int {
 	switch op {
 	case I32Load8S, I64Load8S, I32Load8U, I64Load8U, I32Store8, I64Store8:

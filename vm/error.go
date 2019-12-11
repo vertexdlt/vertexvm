@@ -2,6 +2,7 @@ package vm
 
 import "errors"
 
+// ExecError is VM panic-recovered error type
 type ExecError struct {
 	message string
 }
@@ -10,11 +11,13 @@ func (e *ExecError) Error() string {
 	return e.message
 }
 
+// NewExecError creates a new ExecError provided a message string
 func NewExecError(message string) *ExecError {
 	return &ExecError{message}
 
 }
 
+// ExecError list
 var (
 	ErrInvalidBreak           = NewExecError("invalid break recover")
 	ErrTooManyBrTableTarget   = NewExecError("too many br_table targets")
@@ -42,6 +45,7 @@ var (
 	ErrUnreachable = NewExecError("unreachable")
 )
 
+// Non-panic errors
 var (
 	ErrFuncNotFound     = errors.New("func not found at index")
 	ErrInvalidBlockType = errors.New("invalid block type")
