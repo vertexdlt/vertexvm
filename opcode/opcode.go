@@ -1,6 +1,6 @@
 package opcode
 
-// Opcode repsensents a WASM opcode.
+// Opcode repsensents a WASM
 type Opcode byte
 
 // Control instructions
@@ -13,7 +13,7 @@ const (
 	Else
 )
 
-// End is the special end WASM opcode.
+// End is the special end WASM
 const (
 	End Opcode = 0x0B
 )
@@ -210,3 +210,17 @@ const (
 	F32ReinterpretI32
 	F64ReinterpretI64
 )
+
+func (op Opcode) MemAccessSize() int {
+	switch op {
+	case I32Load8S, I64Load8S, I32Load8U, I64Load8U, I32Store8, I64Store8:
+		return 1
+	case I32Load16S, I64Load16S, I32Load16U, I64Load16U, I32Store16, I64Store16:
+		return 2
+	case I32Load, F32Load, I64Load32S, I64Load32U, I32Store, F32Store, I64Store32:
+		return 4
+	case I64Load, F64Load, I64Store, F64Store:
+		return 8
+	}
+	return 0
+}

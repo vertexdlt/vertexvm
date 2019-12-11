@@ -46,7 +46,7 @@ type vmTest struct {
 	name          string
 	params        []uint64
 	expected      uint64
-	expectedError string
+	expectedError error
 	entry         string
 }
 
@@ -136,36 +136,25 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 
 func TestVmError(t *testing.T) {
 	tests := []vmTest{
-		{name: "exit", entry: "calc", params: []uint64{}, expectedError: "unreachable"},
+		{name: "exit", entry: "calc", params: []uint64{}, expectedError: errors.New("unreachable")},
+		{name: "mem_access", entry: "failed_access", params: []uint64{}, expectedError: errors.New("out of bound memory access")},
+		{name: "mem_access", entry: "access", params: []uint64{}},
 	}
 	for _, test := range tests {
-		defer func() {
-			if r := recover(); r != nil {
-				var err error
-				switch x := r.(type) {
-				case string:
-					err = errors.New(x)
-				case error:
-					err = x
-				default:
-					// Fallback err (per specs, error strings should be lowercase w/o punctuation
-					err = errors.New("unknown panic")
-				}
-
-				if err.Error() != test.expectedError {
-					t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, r)
-				}
-			}
-		}()
-
 		vm := getVM(test.name, &FreeGasPolicy{}, 0)
 		fnID, ok := vm.GetFunctionIndex(test.entry)
 		if !ok {
 			t.Error("cannot get function export")
 		}
 		_, err := vm.Invoke(fnID, test.params...)
-		if err.Error() != test.expectedError {
-			t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, err.Error())
+		if test.expectedError != nil {
+			if err.Error() != test.expectedError.Error() {
+				t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError.Error(), err.Error())
+			}
+		} else {
+			if err != nil {
+				t.Errorf("Test: %s Expect no error, got %s", test.name, err.Error())
+			}
 		}
 	}
 }

@@ -133,7 +133,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			switch r.(type) {
-			case ExecError:
+			case *ExecError:
 				ret, err = 0, r.(error)
 			default:
 				panic(r)
@@ -344,8 +344,8 @@ func (vm *VM) interpret() (uint64, error) {
 			offset := int(frame.readLEB(32, false))
 			address := int(vm.pop())
 			address += offset
+			vm.assertInbound(address, op.MemAccessSize())
 			curMem := vm.memory[address:]
-			//todo inbound access check
 			switch op {
 			case opcode.I32Load, opcode.F32Load:
 				v := binary.LittleEndian.Uint32(curMem)
@@ -376,6 +376,7 @@ func (vm *VM) interpret() (uint64, error) {
 			v := vm.pop()
 			address := int(vm.pop())
 			address += offset
+			vm.assertInbound(address, op.MemAccessSize())
 			curMem := vm.memory[address:]
 			switch op {
 			case opcode.I32Store, opcode.F32Store:
@@ -1184,6 +1185,12 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
 		if returnType != expectedSignature.ReturnTypes[i] {
 			panic(ErrMismatchedFuncSig)
 		}
+	}
+}
+
+func (vm *VM) assertInbound(address, accessSize int) {
+	if address > vm.MemSize()-accessSize {
+		panic(ErrOutOfBoundMemoryAccess)
 	}
 }
 
