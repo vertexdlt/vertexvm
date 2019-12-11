@@ -205,6 +205,7 @@ func (vm *VM) interpret() (uint64, error) {
 		switch {
 		case op == opcode.Unreachable:
 			log.Println("unreachable")
+			panic(ErrUnreachable)
 		case op == opcode.Nop:
 			continue
 		case op == opcode.Block:
