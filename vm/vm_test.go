@@ -43,11 +43,11 @@ type ValueInfo struct {
 }
 
 type vmTest struct {
-	name          string
-	params        []uint64
-	expected      uint64
-	expectedError error
-	entry         string
+	name        string
+	params      []uint64
+	expected    uint64
+	entry       string
+	expectedErr error
 }
 
 func getVM(name string, gasPolicy GasPolicy, gasLimit uint64) *VM {
@@ -136,26 +136,42 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 
 func TestVmError(t *testing.T) {
 	tests := []vmTest{
-		{name: "exit", entry: "calc", params: []uint64{}, expectedError: errors.New("unreachable")},
-		{name: "mem_access", entry: "failed_access", params: []uint64{}, expectedError: errors.New("out of bound memory access")},
+		{name: "exit", entry: "calc", params: []uint64{1}, expectedErr: ErrUnreachable},
+		{name: "local", entry: "calc", params: []uint64{}, expectedErr: ErrWrongNumberOfArgs},
+		{name: "mem_access", entry: "failed_access", params: []uint64{}, expectedErr: ErrOutOfBoundMemoryAccess},
 		{name: "mem_access", entry: "access", params: []uint64{}},
 	}
 	for _, test := range tests {
-		vm := getVM(test.name, &FreeGasPolicy{}, 0)
-		fnID, ok := vm.GetFunctionIndex(test.entry)
-		if !ok {
-			t.Error("cannot get function export")
-		}
-		_, err := vm.Invoke(fnID, test.params...)
-		if test.expectedError != nil {
-			if err.Error() != test.expectedError.Error() {
-				t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError.Error(), err.Error())
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					var err error
+					switch x := r.(type) {
+					case string:
+						err = errors.New(x)
+					case error:
+						err = x
+					default:
+						// Fallback err (per specs, error strings should be lowercase w/o punctuation
+						err = errors.New("unknown panic")
+					}
+
+					if err != test.expectedErr {
+						t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedErr, r)
+					}
+				}
+			}()
+
+			vm := getVM(test.name, &FreeGasPolicy{}, 0)
+			fnID, ok := vm.GetFunctionIndex(test.entry)
+			if !ok {
+				t.Error("cannot get function export")
 			}
-		} else {
-			if err != nil {
-				t.Errorf("Test: %s Expect no error, got %s", test.name, err.Error())
+			_, err := vm.Invoke(fnID, test.params...)
+			if err != test.expectedErr {
+				t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedErr, err.Error())
 			}
-		}
+		})
 	}
 }
 

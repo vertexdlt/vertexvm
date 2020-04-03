@@ -47,7 +47,8 @@ var (
 
 // Non-panic errors
 var (
-	ErrFuncNotFound     = errors.New("func not found at index")
-	ErrInvalidBlockType = errors.New("invalid block type")
-	ErrOutOfGas         = errors.New("out of gas")
+	ErrFuncNotFound      = errors.New("func not found at index")
+	ErrInvalidBlockType  = errors.New("invalid block type")
+	ErrOutOfGas          = errors.New("out of gas")
+	ErrWrongNumberOfArgs = errors.New("wrong number of arguments")
 )
