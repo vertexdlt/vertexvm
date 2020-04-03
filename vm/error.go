@@ -42,8 +42,8 @@ var (
 )
 
 var (
-	ErrFuncNotFound       = errors.New("func not found at index")
-	ErrInvalidBlockType   = errors.New("invalid block type")
-	ErrOutOfGas           = errors.New("out of gas")
-	ErrInvalidParamNumber = errors.New("invalid parameter number")
+	ErrFuncNotFound      = errors.New("func not found at index")
+	ErrInvalidBlockType  = errors.New("invalid block type")
+	ErrOutOfGas          = errors.New("out of gas")
+	ErrWrongNumberOfArgs = errors.New("wrong number of arguments")
 )

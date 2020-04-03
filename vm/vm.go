@@ -140,7 +140,7 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 			}
 		}
 	}()
-	if err := vm.CheckFunction(int(fidx), args); err != nil {
+	if err := vm.validateFuncArgs(int(fidx), args); err != nil {
 		return 0, err
 	}
 
@@ -1196,7 +1196,7 @@ func (vm *VM) GetFunction(fidx int) *wasm.Function {
 }
 
 // CheckFunction returns error when the number of parameter input is not match with the required number of parameter
-func (vm *VM) CheckFunction(fidx int, args []uint64) error {
+func (vm *VM) validateFuncArgs(fidx int, args []uint64) error {
 	var argSize int
 	if fidx < len(vm.functionImports) {
 		fi := vm.functionImports[fidx]
@@ -1210,7 +1210,7 @@ func (vm *VM) CheckFunction(fidx int, args []uint64) error {
 	}
 
 	if len(args) != argSize {
-		return ErrInvalidParamNumber
+		return ErrWrongNumberOfArgs
 	}
 	return nil
 }
