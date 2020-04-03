@@ -140,6 +140,9 @@ func (vm *VM) Invoke(fidx uint64, args ...uint64) (ret uint64, err error) {
 			}
 		}
 	}()
+	if err := vm.validateFuncArgs(int(fidx), args); err != nil {
+		return 0, err
+	}
 
 	for _, arg := range args {
 		vm.push(arg)
@@ -1190,6 +1193,26 @@ func (vm *VM) assertFuncSig(fidx int, expectedSignature *wasm.FuncType) {
 // GetFunction wraps module get function to take imports into account
 func (vm *VM) GetFunction(fidx int) *wasm.Function {
 	return vm.Module.GetFunction(fidx - len(vm.functionImports))
+}
+
+// CheckFunction returns error when the number of parameter input is not match with the required number of parameter
+func (vm *VM) validateFuncArgs(fidx int, args []uint64) error {
+	var argSize int
+	if fidx < len(vm.functionImports) {
+		fi := vm.functionImports[fidx]
+		argSize = len(fi.signature.ParamTypes)
+	} else {
+		fn := vm.GetFunction(fidx)
+		if fn == nil {
+			return ErrFuncNotFound
+		}
+		argSize = len(fn.Type.ParamTypes)
+	}
+
+	if len(args) != argSize {
+		return ErrWrongNumberOfArgs
+	}
+	return nil
 }
 
 // CallFunction Either invoke an imported function or align the new frame for the incoming interpretation

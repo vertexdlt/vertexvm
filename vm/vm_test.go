@@ -43,11 +43,11 @@ type ValueInfo struct {
 }
 
 type vmTest struct {
-	name          string
-	params        []uint64
-	expected      uint64
-	expectedError string
-	entry         string
+	name        string
+	params      []uint64
+	expected    uint64
+	entry       string
+	expectedErr error
 }
 
 func getVM(name string, gasPolicy GasPolicy, gasLimit uint64) *VM {
@@ -136,37 +136,40 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 
 func TestVmError(t *testing.T) {
 	tests := []vmTest{
-		{name: "exit", entry: "calc", params: []uint64{}, expectedError: "unreachable"},
+		{name: "exit", entry: "calc", params: []uint64{1}, expectedErr: ErrUnreachable},
+		{name: "local", entry: "calc", params: []uint64{}, expectedErr: ErrWrongNumberOfArgs},
 	}
 	for _, test := range tests {
-		defer func() {
-			if r := recover(); r != nil {
-				var err error
-				switch x := r.(type) {
-				case string:
-					err = errors.New(x)
-				case error:
-					err = x
-				default:
-					// Fallback err (per specs, error strings should be lowercase w/o punctuation
-					err = errors.New("unknown panic")
-				}
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					var err error
+					switch x := r.(type) {
+					case string:
+						err = errors.New(x)
+					case error:
+						err = x
+					default:
+						// Fallback err (per specs, error strings should be lowercase w/o punctuation
+						err = errors.New("unknown panic")
+					}
 
-				if err.Error() != test.expectedError {
-					t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, r)
+					if err != test.expectedErr {
+						t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedErr, r)
+					}
 				}
+			}()
+
+			vm := getVM(test.name, &FreeGasPolicy{}, 0)
+			fnID, ok := vm.GetFunctionIndex(test.entry)
+			if !ok {
+				t.Error("cannot get function export")
 			}
-		}()
-
-		vm := getVM(test.name, &FreeGasPolicy{}, 0)
-		fnID, ok := vm.GetFunctionIndex(test.entry)
-		if !ok {
-			t.Error("cannot get function export")
-		}
-		_, err := vm.Invoke(fnID, test.params...)
-		if err.Error() != test.expectedError {
-			t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedError, err.Error())
-		}
+			_, err := vm.Invoke(fnID, test.params...)
+			if err != test.expectedErr {
+				t.Errorf("Test %s: Expect return value to be %s, got %s", test.name, test.expectedErr, err.Error())
+			}
+		})
 	}
 }
 
