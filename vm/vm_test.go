@@ -137,7 +137,7 @@ func (r *TestResolver) GetFunction(module, name string) HostFunction {
 func TestVmError(t *testing.T) {
 	tests := []vmTest{
 		{name: "exit", entry: "calc", params: []uint64{1}, expectedErr: ErrUnreachable},
-		{name: "local", entry: "calc", params: []uint64{}, expectedErr: ErrInvalidParamNumber},
+		{name: "local", entry: "calc", params: []uint64{}, expectedErr: ErrWrongNumberOfArgs},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
