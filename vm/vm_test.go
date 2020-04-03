@@ -138,6 +138,8 @@ func TestVmError(t *testing.T) {
 	tests := []vmTest{
 		{name: "exit", entry: "calc", params: []uint64{1}, expectedErr: ErrUnreachable},
 		{name: "local", entry: "calc", params: []uint64{}, expectedErr: ErrWrongNumberOfArgs},
+		{name: "mem_access", entry: "failed_access", params: []uint64{}, expectedErr: ErrOutOfBoundMemoryAccess},
+		{name: "mem_access", entry: "access", params: []uint64{}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
