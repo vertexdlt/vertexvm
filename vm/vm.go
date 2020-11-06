@@ -408,6 +408,7 @@ func (vm *VM) interpret() (uint64, error) {
 			}
 			if pages+n >= pages && pages+n <= maxPages {
 				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
+				vm.BurnGas(vm.gasPolicy.GetCostForMalloc(n))
 			} else {
 				pages = -1
 			}
