@@ -95,8 +95,12 @@ func NewVM(code []byte, gasPolicy GasPolicy, gas *Gas, importResolver ImportReso
 		gas:            gas,
 	}
 	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
-		vm.memory = make([]byte, uint(m.MemSec.Mems[0].Limits.Min)*wasmPageSize)
+		n := int(m.MemSec.Mems[0].Limits.Min)
+		vm.memory = make([]byte, n*wasmPageSize)
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
+		if err := vm.BurnGas(vm.gasPolicy.GetCostForMalloc(n)); err != nil {
+			return nil, err
+		}
 	}
 
 	functionImports := make([]FunctionImport, 0)
@@ -408,7 +412,9 @@ func (vm *VM) interpret() (uint64, error) {
 			}
 			if pages+n >= pages && pages+n <= maxPages {
 				vm.memory = append(vm.memory, make([]byte, n*wasmPageSize)...)
-				vm.BurnGas(vm.gasPolicy.GetCostForMalloc(n))
+				if err := vm.BurnGas(vm.gasPolicy.GetCostForMalloc(n)); err != nil {
+					return 0, err
+				}
 			} else {
 				pages = -1
 			}

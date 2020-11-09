@@ -380,7 +380,7 @@ func TestWasmSuite(t *testing.T) {
 }
 
 func TestEnoughGas(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, 100)
+	vm := getVM("i32", &SimpleGasPolicy{}, 2148)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")
@@ -392,7 +392,7 @@ func TestEnoughGas(t *testing.T) {
 }
 
 func TestOutOfGas(t *testing.T) {
-	vm := getVM("i32", &SimpleGasPolicy{}, 10)
+	vm := getVM("i32", &SimpleGasPolicy{}, 2058)
 	fnIndex, ok := vm.GetFunctionIndex("calc")
 	if !ok {
 		panic("Cannot get export fn index")
@@ -407,6 +407,18 @@ func TestMemSize(t *testing.T) {
 	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	if len(vm.memory) != vm.MemSize() {
 		t.Errorf("Expect MemSize to be %d, got %d", len(vm.memory), vm.MemSize())
+	}
+}
+
+func TestMemGrow(t *testing.T) {
+	vm := getVM("memory_grow", &SimpleGasPolicy{}, 1024*3+3)
+	fnIndex, ok := vm.GetFunctionIndex("grow")
+	if !ok {
+		panic("Cannot get export fn index")
+	}
+	_, err := vm.Invoke(fnIndex)
+	if err != nil {
+		t.Errorf("Expect execution to go through, got %v", err)
 	}
 }
 
