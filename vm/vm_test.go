@@ -422,6 +422,30 @@ func TestMemGrow(t *testing.T) {
 	}
 }
 
+func TestMemGrowOutOfGas(t *testing.T) {
+	vm := getVM("memory_grow", &SimpleGasPolicy{}, 1024*2+3)
+	fnIndex, ok := vm.GetFunctionIndex("grow")
+	if !ok {
+		panic("Cannot get export fn index")
+	}
+	_, err := vm.Invoke(fnIndex)
+	if err != ErrOutOfGas {
+		t.Errorf("Expect execution to be out of gas, got %v", err)
+	}
+}
+
+func TestMemInitOutOfGas(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			err := r.(error)
+			if err != ErrOutOfGas {
+				t.Errorf("Expect execution to be out of gas, got %v", err)
+			}
+		}
+	}()
+	getVM("memory_grow", &SimpleGasPolicy{}, 2047)
+}
+
 func TestMemRead(t *testing.T) {
 	vm := getVM("i32", &FreeGasPolicy{}, 0)
 	sample := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}
