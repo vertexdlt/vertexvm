@@ -957,6 +957,12 @@ func (vm *VM) interpret() (uint64, error) {
 
 		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
 			// Do nothing
+		case op == opcode.I32Extend8S || op == opcode.I64Extend8S:
+			vm.push(uint64(int8(vm.pop())))
+		case op == opcode.I32Extend16S || op == opcode.I64Extend16S:
+			vm.push(uint64(int16(vm.pop())))
+		case op == opcode.I64Extend32S:
+			vm.push(uint64(int32(vm.pop())))
 		case op == opcode.ITruncSatF:
 			subop := frame.readLEB(1, false)
 			switch subop {
