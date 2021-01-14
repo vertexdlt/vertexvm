@@ -198,6 +198,7 @@ func TestVM(t *testing.T) {
 		{name: "br_table", entry: "calc", params: []uint64{100}, expected: 16},
 		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
 		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
+		{name: "trunc", entry: "main", params: []uint64{}, expected: 4294967295},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name, &FreeGasPolicy{}, 0)
@@ -217,30 +218,32 @@ func TestVM(t *testing.T) {
 func TestWasmSuite(t *testing.T) {
 	tests := []string{
 		"i32", "i64", "f32", "f64",
-		"f32_cmp", "f32_bitwise", "f64_cmp", "f64_bitwise", "conversions",
-		"br", "br_if", "br_table", "call", "call_indirect",
-		"globals", "local_get", "local_set", "local_tee",
+		"f32_cmp", "f32_bitwise", "f64_cmp", "f64_bitwise",
+		"br", "br_if", "br_table",
+		"call", "call_indirect",
+		"global", "local_get", "local_set", "local_tee",
 		"memory", "memory_grow", "memory_size", "memory_redundancy", "memory_trap",
 		"binary", "binary-leb128", "block",
 		"address",
-		"break-drop", "comments",
+		"comments",
 		"return", "select", "loop", "if",
 		"custom", "endianness",
 		"fac", "float_literals", "float_memory",
 		"forward", "func",
 		"inline-module", "int_exprs", "int_literals", "labels",
 		"left-to-right", "load", "nop", "stack", "store", "switch", "token",
-		"traps", "type", "typecheck", "unreachable", "unreached-invalid", "unwind",
+		"traps", "type", "unreachable", "unreached-invalid", "unwind",
 		"utf8-custom-section-id", "utf8-import-field", "utf8-import-module", "utf8-invalid-encoding",
 		"skip-stack-guard-page", "float_exprs", "float_misc", "align",
 		"start", "func_ptrs",
-		"exports", // empty module removed
+		"const", "table", "break-drop",
+		"conversions",
 
+		// "exports", // empty module removed
 		// "linking",
-		// "const",	//some const test is off by 1. VM result is similar to that of Emscripten & WS
-		// "elem", "data",	//wagon parsing failed
-		// "names",	// problem with unicode. Entries key and cmd.Action.Field yield different codes
-		// "imports",	// missing imports from spec
+		// "elem", "data", //wagon parsing failed
+		// "names", // problem with unicode. Entries key and cmd.Action.Field yield different codes
+		// "imports", // missing imports from spec
 	}
 
 	for _, name := range tests {
@@ -315,13 +318,14 @@ func TestWasmSuite(t *testing.T) {
 
 					if len(cmd.Expected) != 0 {
 						var exp uint64
-						if cmd.Type == "assert_return_canonical_nan" {
+						// t.Log("cmd.Type", cmd.Type, cmd.Expected[0].Value)
+						if cmd.Expected[0].Value == "nan:canonical" {
 							if cmd.Expected[0].Type == "f32" {
 								exp = 0x7fc00000
 							} else if cmd.Expected[0].Type == "f64" {
 								exp = 0x7ff8000000000000
 							}
-						} else if cmd.Type == "assert_return_arithmetic_nan" {
+						} else if cmd.Expected[0].Value == "nan:arithmetic" {
 							// An arithmetic NaN is a floating-point value ±𝗇𝖺𝗇(n) with n≥canonN, such that the most significant bit is 1 while all others are arbitrary.
 							// Unset sign bit, pass if >= canonical NaN in integer
 							if cmd.Expected[0].Type == "f32" && (uint32(ret)&^(1<<31)) >= uint32(0x7fc00000) {
