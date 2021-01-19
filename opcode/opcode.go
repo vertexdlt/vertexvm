@@ -212,6 +212,15 @@ const (
 	F64ReinterpretI64
 )
 
+// Sign-extending Operators
+const (
+	I32Extend8S Opcode = iota + 0xC0
+	I32Extend16S
+	I64Extend8S
+	I64Extend16S
+	I64Extend32S
+)
+
 // Nontrapping Float-to-Int Operator
 const (
 	ITruncSatF Opcode = iota + 0xFC
