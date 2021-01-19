@@ -2,6 +2,265 @@
 
 ;; Syntax error
 
+(module (func (i32.const 0_123_456_789) drop))
+(module (func (i32.const 0x0_9acf_fBDF) drop))
+(assert_malformed
+  (module quote "(func (i32.const) drop)")
+  "unexpected token"
+)
+(assert_malformed
+  (module quote "(func (i32.const 0x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (i32.const 1x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (i32.const 0xg) drop)")
+  "unknown operator"
+)
+
+(module (func (i64.const 0_123_456_789) drop))
+(module (func (i64.const 0x0125_6789_ADEF_bcef) drop))
+(assert_malformed
+  (module quote "(func (i64.const) drop)")
+  "unexpected token"
+)
+(assert_malformed
+  (module quote "(func (i64.const 0x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (i64.const 1x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (i64.const 0xg) drop)")
+  "unknown operator"
+)
+
+(module (func (f32.const 0123456789) drop))
+(module (func (f32.const 0123456789e019) drop))
+(module (func (f32.const 0123456789e+019) drop))
+(module (func (f32.const 0123456789e-019) drop))
+(module (func (f32.const 0123456789.) drop))
+(module (func (f32.const 0123456789.e019) drop))
+(module (func (f32.const 0123456789.e+019) drop))
+(module (func (f32.const 0123456789.e-019) drop))
+(module (func (f32.const 0123456789.0123456789) drop))
+(module (func (f32.const 0123456789.0123456789e019) drop))
+(module (func (f32.const 0123456789.0123456789e+019) drop))
+(module (func (f32.const 0123456789.0123456789e-019) drop))
+(module (func (f32.const 0x0123456789ABCDEF) drop))
+(module (func (f32.const 0x0123456789ABCDEFp019) drop))
+(module (func (f32.const 0x0123456789ABCDEFp+019) drop))
+(module (func (f32.const 0x0123456789ABCDEFp-019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.) drop))
+(module (func (f32.const 0x0123456789ABCDEF.p019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.p+019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.p-019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.019aF) drop))
+(module (func (f32.const 0x0123456789ABCDEF.019aFp019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.019aFp+019) drop))
+(module (func (f32.const 0x0123456789ABCDEF.019aFp-019) drop))
+(assert_malformed
+  (module quote "(func (f32.const) drop)")
+  "unexpected token"
+)
+(assert_malformed
+  (module quote "(func (f32.const .0) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const .0e0) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0e) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0e+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0.0e) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0.0e-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 1x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0xg) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x.) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0.g) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0p) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0p+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0p-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0.0p) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0.0p+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0.0p-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f32.const 0x0pA) drop)")
+  "unknown operator"
+)
+
+
+(module (func (f64.const 0123456789) drop))
+(module (func (f64.const 0123456789e019) drop))
+(module (func (f64.const 0123456789e+019) drop))
+(module (func (f64.const 0123456789e-019) drop))
+(module (func (f64.const 0123456789.) drop))
+(module (func (f64.const 0123456789.e019) drop))
+(module (func (f64.const 0123456789.e+019) drop))
+(module (func (f64.const 0123456789.e-019) drop))
+(module (func (f64.const 0123456789.0123456789) drop))
+(module (func (f64.const 0123456789.0123456789e019) drop))
+(module (func (f64.const 0123456789.0123456789e+019) drop))
+(module (func (f64.const 0123456789.0123456789e-019) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9.) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9.0_1_2_3_4_5_6_7_8_9) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9e+0_1_9) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9.e+0_1_9) drop))
+(module (func (f64.const 0_1_2_3_4_5_6_7_8_9.0_1_2_3_4_5_6_7_8_9e0_1_9) drop))
+
+(module (func (f64.const 0x0123456789ABCDEFabcdef) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdefp019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdefp+019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdefp-019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.p019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.p+019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.p-019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.0123456789ABCDEFabcdef) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.0123456789ABCDEFabcdefp019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.0123456789ABCDEFabcdefp+019) drop))
+(module (func (f64.const 0x0123456789ABCDEFabcdef.0123456789ABCDEFabcdefp-019) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f.) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f.0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_fp0_1_9) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f.p0_1_9) drop))
+(module (func (f64.const 0x0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_f.0_1_2_3_4_5_6_7_8_9_A_B_C_D_E_F_a_b_c_d_e_fp0_1_9) drop))
+
+
+(assert_malformed
+  (module quote "(func (f64.const) drop)")
+  "unexpected token"
+)
+(assert_malformed
+  (module quote "(func (f64.const .0) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const .0e0) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0e) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0e+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0.0e) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0.0e-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 1x) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0xg) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x.) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0.g) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0p) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0p+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0p-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0.0p) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0.0p+) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0.0p-) drop)")
+  "unknown operator"
+)
+(assert_malformed
+  (module quote "(func (f64.const 0x0pA) drop)")
+  "unknown operator"
+)
+
+
+;; Range error
+
 (module (func (i32.const 0xffffffff) drop))
 (module (func (i32.const -0x80000000) drop))
 (assert_malformed
@@ -144,8 +403,8 @@
 
 (module (func (f32.const nan:0x1) drop))
 (module (func (f64.const nan:0x1) drop))
-(module (func (f32.const nan:0x7fffff) drop))
-(module (func (f64.const nan:0xfffffffffffff) drop))
+(module (func (f32.const nan:0x7f_ffff) drop))
+(module (func (f64.const nan:0xf_ffff_ffff_ffff) drop))
 
 (assert_malformed
   (module quote "(func (f32.const nan:1) drop)")
