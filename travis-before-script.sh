@@ -9,4 +9,4 @@ sudo mv ./bin/* /usr/local/bin/
 wget -c https://github.com/WebAssembly/wabt/releases/download/1.0.20/wabt-1.0.20-ubuntu.tar.gz -O - | tar -xz && ls
 
 # Move wat2wasm to path
-sudo mv ./wabt-1.0.20/* /usr/local/bin/
+sudo mv ./wabt-1.0.20/bin/* /usr/local/bin/
