@@ -212,6 +212,11 @@ const (
 	F64ReinterpretI64
 )
 
+// Nontrapping Float-to-Int Operator
+const (
+	ITruncSatF Opcode = iota + 0xFC
+)
+
 // MemAccessSize returns opcode memory access size. Non-memory opcodes should return 0
 func (op Opcode) MemAccessSize() int {
 	switch op {

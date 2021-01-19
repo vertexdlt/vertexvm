@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/bits"
 
+	"github.com/vertexdlt/vertexvm/number"
 	"github.com/vertexdlt/vertexvm/opcode"
 	"github.com/vertexdlt/vertexvm/wasm"
 )
@@ -873,81 +874,53 @@ func (vm *VM) interpret() (uint64, error) {
 			case opcode.F64Sqrt:
 				r = math.Sqrt(f)
 			}
-
 			vm.pushFloat64(r)
 
 		// Conversion
 		case op == opcode.I32WrapI64:
 			vm.push(uint64(uint32(vm.pop())))
-		case op == opcode.I32TruncSF32:
-			f := math.Float32frombits(uint32(vm.pop()))
-			if math.IsNaN(float64(f)) {
+		case opcode.I32TruncSF32 <= op && op <= opcode.I32TruncUF64:
+			var r uint64
+			var trapCode number.TrapCode
+			switch op {
+			case opcode.I32TruncSF32:
+				r, trapCode = number.FloatTruncate(number.F32, number.I32, vm.pop())
+			case opcode.I32TruncUF32:
+				r, trapCode = number.FloatTruncate(number.F32, number.U32, vm.pop())
+			case opcode.I32TruncSF64:
+				r, trapCode = number.FloatTruncate(number.F64, number.I32, vm.pop())
+			case opcode.I32TruncUF64:
+				r, trapCode = number.FloatTruncate(number.F64, number.U32, vm.pop())
+			}
+			if trapCode == number.NanTrap {
 				panic(ErrInvalidIntConversion)
-			} else if f < math.MinInt32 || f > math.MaxInt32 {
+			} else if trapCode == number.ConvertTrap {
 				panic(ErrIntegerOverflow)
 			}
-			vm.push(uint64(uint32(int32(f))))
-		case op == opcode.I32TruncUF32:
-			i := uint32(vm.pop())
-			f := math.Float32frombits(i)
-			if math.IsNaN(float64(f)) {
-				panic(ErrInvalidIntConversion)
-			} else if f > math.MaxUint32 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(uint32(f)))
-		case op == opcode.I32TruncSF64:
-			f := math.Float64frombits(vm.pop())
-			if math.IsNaN(f) {
-				panic(ErrInvalidIntConversion)
-			} else if f < math.MinInt32 || f > math.MaxInt32 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(uint32(int32(f))))
-		case op == opcode.I32TruncUF64:
-			f := math.Float64frombits(vm.pop())
-			if math.IsNaN(f) {
-				panic(ErrInvalidIntConversion)
-			} else if f > math.MaxUint32 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(uint32(f)))
+			vm.push(r)
 		case op == opcode.I64ExtendSI32:
 			vm.push(uint64(int64(int32(uint32(vm.pop())))))
 		case op == opcode.I64ExtendUI32:
 			vm.push(uint64(uint32(vm.pop())))
-		case op == opcode.I64TruncSF32:
-			f := math.Float32frombits(uint32(vm.pop()))
-			if math.IsNaN(float64(f)) {
+		case opcode.I64TruncSF32 <= op && op <= opcode.I64TruncUF64:
+			var r uint64
+			var trapCode number.TrapCode
+			switch op {
+			case opcode.I64TruncSF32:
+				r, trapCode = number.FloatTruncate(number.F32, number.I64, vm.pop())
+			case opcode.I64TruncUF32:
+				r, trapCode = number.FloatTruncate(number.F32, number.U64, vm.pop())
+			case opcode.I64TruncSF64:
+				r, trapCode = number.FloatTruncate(number.F64, number.I64, vm.pop())
+			case opcode.I64TruncUF64:
+				r, trapCode = number.FloatTruncate(number.F64, number.U64, vm.pop())
+			}
+			if trapCode == number.NanTrap {
 				panic(ErrInvalidIntConversion)
-			} else if f < math.MinInt64 || f > math.MaxInt64 {
+			} else if trapCode == number.ConvertTrap {
 				panic(ErrIntegerOverflow)
 			}
-			vm.push(uint64(int64(f)))
-		case op == opcode.I64TruncUF32:
-			f := math.Float32frombits(uint32(vm.pop()))
-			if math.IsNaN(float64(f)) {
-				panic(ErrInvalidIntConversion)
-			} else if f > math.MaxUint64 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(f))
-		case op == opcode.I64TruncSF64:
-			f := math.Float64frombits(vm.pop())
-			if math.IsNaN(f) {
-				panic(ErrInvalidIntConversion)
-			} else if f < math.MinInt64 || f > math.MaxInt64 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(int64(f)))
-		case op == opcode.I64TruncUF64:
-			f := math.Float64frombits(vm.pop())
-			if math.IsNaN(f) {
-				panic(ErrInvalidIntConversion)
-			} else if f > math.MaxUint64 {
-				panic(ErrIntegerOverflow)
-			}
-			vm.push(uint64(f))
+			vm.push(r)
 		case op == opcode.F32ConvertSI32:
 			i := int32(uint32(vm.pop()))
 			vm.push(uint64(math.Float32bits(float32(i))))
@@ -984,6 +957,34 @@ func (vm *VM) interpret() (uint64, error) {
 
 		case opcode.I32ReinterpretF32 <= op && op <= opcode.F64ReinterpretI64:
 			// Do nothing
+		case op == opcode.ITruncSatF:
+			subop := frame.readLEB(1, false)
+			switch subop {
+			case 0: //I32TruncSatF32S
+				r, _ := number.FloatTruncate(number.F32, number.I32, vm.pop())
+				vm.push(r)
+			case 1: //I32TruncSatF32U
+				r, _ := number.FloatTruncate(number.F32, number.U32, vm.pop())
+				vm.push(r)
+			case 2: //I32TruncSatF64S
+				r, _ := number.FloatTruncate(number.F64, number.I32, vm.pop())
+				vm.push(r)
+			case 3: //I32TruncSatF64U
+				r, _ := number.FloatTruncate(number.F64, number.U32, vm.pop())
+				vm.push(r)
+			case 4: //I64TruncSatF32S
+				r, _ := number.FloatTruncate(number.F32, number.I64, vm.pop())
+				vm.push(r)
+			case 5: //I64TruncSatF32U
+				r, _ := number.FloatTruncate(number.F32, number.U64, vm.pop())
+				vm.push(r)
+			case 6: //I64TruncSatF64S
+				r, _ := number.FloatTruncate(number.F64, number.I64, vm.pop())
+				vm.push(r)
+			case 7: //I64TruncSatF64U
+				r, _ := number.FloatTruncate(number.F64, number.U64, vm.pop())
+				vm.push(r)
+			}
 		default:
 			panic(ErrUnknownOpcode)
 		}
