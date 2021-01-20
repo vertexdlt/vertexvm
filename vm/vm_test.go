@@ -48,6 +48,7 @@ type vmTest struct {
 	expected    uint64
 	entry       string
 	expectedErr error
+	trapText    string
 }
 
 func getVM(name string, gasPolicy GasPolicy, gasLimit uint64) *VM {
@@ -199,6 +200,8 @@ func TestVM(t *testing.T) {
 		{name: "return", entry: "calc", params: []uint64{}, expected: 9},
 		{name: "import_env", entry: "calc", params: []uint64{}, expected: 3},
 		{name: "trunc", entry: "main", params: []uint64{}, expected: 4294967295},
+		{name: "trunc_trap", entry: "main", params: []uint64{}, trapText: "integer overflow"},
+		{name: "trunc_edge", entry: "main", params: []uint64{}, expected: 0},
 	}
 	for _, test := range tests {
 		vm := getVM(test.name, &FreeGasPolicy{}, 0)
@@ -208,8 +211,14 @@ func TestVM(t *testing.T) {
 		if !ok {
 			t.Error("cannot get function export")
 		}
-		ret, _ := vm.Invoke(fnID, test.params...)
-		if ret != test.expected {
+		ret, err := vm.Invoke(fnID, test.params...)
+		if err != nil {
+			if test.trapText == "" {
+				t.Errorf("Test %s: Expect no trap got %s", test.name, err.Error())
+			} else if err.Error() != test.trapText {
+				t.Errorf("Test %s: Expect trap text to be %s, got %s", test.name, test.trapText, err.Error())
+			}
+		} else if ret != test.expected {
 			t.Errorf("Test %s: Expect return value to be %d, got %d", test.name, test.expected, ret)
 		}
 	}
