@@ -308,7 +308,7 @@ func (vm *VM) interpret() (uint64, error) {
 
 			frame.readLEB(1, false) // reserve as per https://github.com/WebAssembly/design/blob/master/BinaryEncoding.md#call-operators-described-here
 			eidx := vm.pop()
-			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) {
+			if int(eidx) >= len(vm.Module.TableIndexSpace[0]) || int(eidx) < 0 {
 				panic(ErrOutOfBoundTableAccess)
 			}
 			fidx := int(vm.Module.TableIndexSpace[0][eidx])
@@ -511,7 +511,8 @@ func (vm *VM) interpret() (uint64, error) {
 				if b == 0 {
 					panic(ErrIntegerDivisionByZero)
 				}
-				if a == math.MaxInt32+1 && b == math.MaxInt32 {
+				//trap when lhs = max + 1 && rhs = -1
+				if a == math.MaxInt32+1 && b == math.MaxUint32 {
 					panic(ErrIntegerOverflow)
 				}
 				c = uint32(int32(a) / int32(b))
@@ -640,7 +641,7 @@ func (vm *VM) interpret() (uint64, error) {
 				if b == 0 {
 					panic(ErrIntegerDivisionByZero)
 				}
-				if a == math.MaxInt64+1 && b == math.MaxInt64 {
+				if a == math.MaxInt64+1 && b == math.MaxUint64 {
 					panic(ErrIntegerOverflow)
 				}
 				c = uint64(int64(a) / int64(b))
@@ -1249,9 +1250,8 @@ func (vm *VM) CallFunction(fidx int) error {
 		ret, err := hf(vm, args...)
 		vm.push(ret)
 		return err
-	} else {
-		return vm.setupFrame(fidx)
 	}
+	return vm.setupFrame(fidx)
 }
 
 // MemSize gets the current vm memory size
