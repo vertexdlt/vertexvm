@@ -98,6 +98,9 @@ func NewVM(code []byte, gasPolicy GasPolicy, gas *Gas, importResolver ImportReso
 	if m.MemSec != nil && len(m.MemSec.Mems) != 0 {
 		n := int(m.MemSec.Mems[0].Limits.Min)
 		vm.memory = make([]byte, n*wasmPageSize)
+		if len(vm.memory) < len(m.LinearMemoryIndexSpace[0]) {
+			return nil, ErrOutOfBoundMemoryAccess
+		}
 		copy(vm.memory, m.LinearMemoryIndexSpace[0])
 		if err := vm.BurnGas(vm.gasPolicy.GetCostForMalloc(n)); err != nil {
 			return nil, err
